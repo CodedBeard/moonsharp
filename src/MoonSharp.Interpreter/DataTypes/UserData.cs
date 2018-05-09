@@ -4,6 +4,7 @@ using System.Reflection;
 using System.Linq;
 using MoonSharp.Interpreter.Interop;
 using MoonSharp.Interpreter.Interop.BasicDescriptors;
+using MoonSharp.Interpreter.Interop.Converters;
 using MoonSharp.Interpreter.Interop.RegistrationPolicies;
 using MoonSharp.Interpreter.Interop.StandardDescriptors;
 using MoonSharp.Interpreter.Interop.UserDataRegistries;
@@ -11,54 +12,259 @@ using MoonSharp.Interpreter.Serialization.Json;
 
 namespace MoonSharp.Interpreter
 {
-	/// <summary>
-	/// Class exposing C# objects as Lua userdata.
-	/// For efficiency, a global registry of types is maintained, instead of a per-script one.
-	/// </summary>
-	public class UserData : RefIdObject
+
+    public interface IUserData : IEquatable<IUserData>
+    {
+        T Get<T>();
+        bool TryGet<T>(out T param);
+        bool TrySet<T>(T param);
+        DynValue UserValue { get; set; }
+        IUserDataDescriptor Descriptor { get; set; }
+        Type UnderlyingType { get;}
+        bool HasValue();
+        //bool Is(Type t);
+        //bool Is<T>();
+        string AsString();
+    }
+
+    public sealed class UserDataStruct<T> : RefIdObject, IUserData
+    {
+        public static int INSTANCE_AMOUNT;
+        public const int MAX_POOL_SIZE = 10000;
+
+        private static Stack<UserDataStruct<T>> _pool = new Stack<UserDataStruct<T>>(MAX_POOL_SIZE);
+
+        static UserDataStruct()
+        {
+            new System.Threading.Thread(() => UserDataStruct<T>.WarnDynValueCache()).Start();
+        }
+
+        public static UserDataStruct<T> Request()
+        {
+            UserDataStruct<T> ud;
+            lock (_pool)
+            {
+                if (_pool.Count > 0)
+                {
+                    ud = _pool.Pop();
+                    GC.ReRegisterForFinalize(ud);
+                }
+                else
+                {
+                    ud = new UserDataStruct<T>();
+                    INSTANCE_AMOUNT++;
+                }
+            }
+            return ud;
+        }
+
+        ~UserDataStruct()
+        {
+            UserValue = DynValue.Invalid;
+            t = default(T);
+            Descriptor = null;
+            if (_pool.Count < MAX_POOL_SIZE)
+            {
+                lock (_pool)
+                {
+                    _pool.Push(this);
+                }
+            }
+        }
+
+        private T t;
+
+        public IUserDataDescriptor Descriptor { get; set; }
+
+        public DynValue UserValue { get; set; }
+
+        public Type UnderlyingType { get { return typeof(T); } }
+
+        public string AsString() { return Descriptor.AsString(this); }
+
+        public bool Is(Type type) { return typeof(T).IsAssignableFrom(type); }
+
+        public bool Is<TYPE>() { return t is TYPE; }
+
+        public TParam Get<TParam>()
+        {
+            return ValueConverter<T, TParam>.Instance.Convert(t);
+        }
+
+        public bool TryGet<TParam>(out TParam param)
+        {
+            bool success = false;
+            if (typeof(T) == typeof(TParam))
+            {
+                param = ValueConverter<T, TParam>.Instance.Convert(t);
+                success = true;
+            }
+            else
+            {
+                param = default(TParam);
+            }
+            return success;
+        }
+
+        public bool TrySet<TParam>(TParam param)
+        {
+            bool success = false;
+            if (typeof(TParam) == typeof(T))
+            {
+                t = ValueConverter<TParam, T>.Instance.Convert(param);
+                success = true;
+            }
+            return success;
+        }
+
+        public bool HasValue() { return true; }
+
+        public bool Equals(IUserData other)
+        {
+            T otherT;
+            if (other.TryGet(out otherT))
+                return t.Equals(otherT);
+            return false;
+        }
+
+        internal static void WarnDynValueCache()
+        {
+            lock (_pool)
+            {
+                INSTANCE_AMOUNT = MAX_POOL_SIZE;
+                for (int i = MAX_POOL_SIZE; i > 0; i--)
+                    _pool.Push(new UserDataStruct<T>());
+            }
+        }
+    }
+
+
+
+    public sealed class UserDataRef : RefIdObject, IUserData
+    {
+        public static int INSTANCE_AMOUNT;
+        public const int MAX_POOL_SIZE = 10000;
+
+        private static Stack<UserDataRef> _pool = new Stack<UserDataRef>(MAX_POOL_SIZE);
+
+        public static UserDataRef Request()
+        {
+            UserDataRef ud;
+            lock (_pool)
+            {
+                if (_pool.Count > 0)
+                {
+                    ud = _pool.Pop();
+                    GC.ReRegisterForFinalize(ud);
+                }
+                else
+                {
+                    ud = new UserDataRef();
+                    INSTANCE_AMOUNT++;
+                }
+            }
+            return ud;
+        }
+
+        ~UserDataRef()
+        {
+            UserValue = DynValue.Invalid;
+            _object = null;
+            Descriptor = null;
+            lock (_pool)
+            {
+                if (_pool.Count < MAX_POOL_SIZE)
+                    _pool.Push(this);
+            }
+        }
+
+        private object _object;
+
+        public IUserDataDescriptor Descriptor { get; set; }
+
+        public DynValue UserValue { get; set; }
+
+        public Type UnderlyingType { get { return _object.GetType(); } }
+
+        public bool HasValue() { return _object != null; }
+        public string AsString() { return Descriptor.AsString(this); }
+
+        public object GetRaw()
+        {
+            return _object;
+        }
+
+        public TParam Get<TParam>()
+        {
+            return (TParam)_object;
+        }
+
+        public bool TryGet<TParam>(out TParam param)
+        {
+            bool success = false;
+            if (_object is TParam)
+            {
+                param = (TParam)_object;
+                success = true;
+            }
+            else
+            {
+                param = default(TParam);
+            }
+            return success;
+        }
+
+        public bool TrySet<TParam>(TParam param)
+        {
+            _object = param;
+            return true;
+        }
+
+        public bool Equals(IUserData other)
+        {
+            object otherT;
+            if (other.TryGet(out otherT))
+                return _object.Equals(otherT);
+            return false;
+        }
+
+        internal static void WarnDynValueCache()
+        {
+            lock (_pool)
+            {
+                INSTANCE_AMOUNT = MAX_POOL_SIZE;
+                for (int i = MAX_POOL_SIZE; i > 0; i--)
+                    _pool.Push(new UserDataRef());
+            }
+        }
+    }
+    /// <summary>
+    /// Class exposing C# objects as Lua userdata.
+    /// For efficiency, a global registry of types is maintained, instead of a per-script one.
+    /// </summary>
+    public static class UserData
 	{
-		private UserData()
-		{
-			// This type can only be instantiated using one of the Create methods
-		}
+        static UserData()
+        {
+            RegistrationPolicy = InteropRegistrationPolicy.Default;
 
-		/// <summary>
-		/// Gets or sets the "uservalue". See debug.getuservalue and debug.setuservalue.
-		/// http://www.lua.org/manual/5.2/manual.html#pdf-debug.setuservalue
-		/// </summary>
-		public DynValue UserValue { get; set; }
+            RegisterType<EventFacade>(InteropAccessMode.NoReflectionAllowed);
+            RegisterType<AnonWrapper>(InteropAccessMode.HideMembers);
+            RegisterType<EnumerableWrapper>(InteropAccessMode.NoReflectionAllowed);
+            RegisterType<JsonNull>(InteropAccessMode.Reflection);
 
-		/// <summary>
-		/// Gets the object associated to this userdata (null for statics)
-		/// </summary>
-		public object Object { get; private set; }
+            DefaultAccessMode = InteropAccessMode.LazyOptimized;
 
-		/// <summary>
-		/// Gets the type descriptor of this userdata
-		/// </summary>
-		public IUserDataDescriptor Descriptor { get; private set; }
+            new System.Threading.Thread(() => UserDataRef.WarnDynValueCache()).Start();
+        }
 
-
-
-		static UserData()
-		{
-			RegistrationPolicy = InteropRegistrationPolicy.Default;
-
-			RegisterType<EventFacade>(InteropAccessMode.NoReflectionAllowed);
-			RegisterType<AnonWrapper>(InteropAccessMode.HideMembers);
-			RegisterType<EnumerableWrapper>(InteropAccessMode.NoReflectionAllowed);
-			RegisterType<JsonNull>(InteropAccessMode.Reflection);
-
-			DefaultAccessMode = InteropAccessMode.LazyOptimized;
-		}
-
-		/// <summary>
-		/// Registers a type for userdata interop
-		/// </summary>
-		/// <typeparam name="T">The type to be registered</typeparam>
-		/// <param name="accessMode">The access mode (optional).</param>
-		/// <param name="friendlyName">Friendly name for the type (optional)</param>
-		public static IUserDataDescriptor RegisterType<T>(InteropAccessMode accessMode = InteropAccessMode.Default, string friendlyName = null)
+        /// <summary>
+        /// Registers a type for userdata interop
+        /// </summary>
+        /// <typeparam name="T">The type to be registered</typeparam>
+        /// <param name="accessMode">The access mode (optional).</param>
+        /// <param name="friendlyName">Friendly name for the type (optional)</param>
+        public static IUserDataDescriptor RegisterType<T>(InteropAccessMode accessMode = InteropAccessMode.Default, string friendlyName = null)
 		{
 			return TypeDescriptorRegistry.RegisterType_Impl(typeof(T), accessMode, friendlyName, null);
 		}
@@ -208,13 +414,22 @@ namespace MoonSharp.Interpreter
 		/// <param name="o">The object</param>
 		/// <param name="descr">The descriptor.</param>
 		/// <returns></returns>
-		public static DynValue Create(object o, IUserDataDescriptor descr)
+		public static DynValue CreateWithDescriptor<T>(T o, IUserDataDescriptor descr)
 		{
-			return DynValue.NewUserData(new UserData()
-			{
-				Descriptor = descr,
-				Object = o
-			});
+		    IUserData userData;
+
+		    if (typeof(T).IsValueType)
+		    {
+		        userData = UserDataStruct<T>.Request();
+		    }
+		    else
+		    {
+                userData = UserDataRef.Request();
+            }
+            userData.Descriptor = descr;
+            userData.TrySet(o);
+
+            return DynValue.NewUserData(userData);
 		}
 
 		/// <summary>
@@ -222,18 +437,17 @@ namespace MoonSharp.Interpreter
 		/// </summary>
 		/// <param name="o">The object</param>
 		/// <returns></returns>
-		public static DynValue Create(object o)
+		public static DynValue Create<T>(T o)
 		{
 			var descr = GetDescriptorForObject(o);
 			if (descr == null)
 			{
-				if (o is Type)
-					return CreateStatic((Type)o);
-
-				return null;
+                if (o is Type)
+					return CreateStatic(ValueConverter<T, Type>.Instance.Convert(o));
+				return DynValue.Invalid;
 			}
 
-			return Create(o, descr);
+			return CreateWithDescriptor(o, descr);
 		}
 
 		/// <summary>
@@ -243,23 +457,22 @@ namespace MoonSharp.Interpreter
 		/// <returns></returns>
 		public static DynValue CreateStatic(IUserDataDescriptor descr)
 		{
-			if (descr == null) return null;
+		    if (descr == null)
+                return DynValue.Invalid;
 
-			return DynValue.NewUserData(new UserData()
-			{
-				Descriptor = descr,
-				Object = null
-			});
+		    var userData = UserDataRef.Request();
+		    userData.Descriptor = descr;
+		    return DynValue.NewUserData(userData);
 		}
 
-		/// <summary>
-		/// Creates a static userdata DynValue from the specified Type
-		/// </summary>
-		/// <param name="t">The type</param>
-		/// <returns></returns>
-		public static DynValue CreateStatic(Type t)
-		{
-			return CreateStatic(GetDescriptorForType(t, false));
+        /// <summary>
+        /// Creates a static userdata DynValue from the specified Type
+        /// </summary>
+        /// <param name="t">The type</param>
+        /// <returns></returns>
+        public static DynValue CreateStatic(Type t)
+        {
+            return CreateStatic(GetDescriptorForType(t, false));
 		}
 
 		/// <summary>
@@ -353,9 +566,9 @@ namespace MoonSharp.Interpreter
 		/// </summary>
 		/// <param name="o">The object.</param>
 		/// <returns></returns>
-		public static IUserDataDescriptor GetDescriptorForObject(object o)
+		public static IUserDataDescriptor GetDescriptorForObject<T>(T t)
 		{
-			return TypeDescriptorRegistry.GetDescriptorForType(o.GetType(), true);
+			return TypeDescriptorRegistry.GetDescriptorForType(typeof(T).IsValueType ? typeof(T) : t.GetType(), true);
 		}
 
 

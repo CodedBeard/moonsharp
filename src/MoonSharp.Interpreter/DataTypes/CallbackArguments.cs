@@ -6,11 +6,11 @@ namespace MoonSharp.Interpreter
 	/// <summary>
 	/// This class is a container for arguments received by a CallbackFunction
 	/// </summary>
-	public class CallbackArguments
+	public struct CallbackArguments
 	{
 		IList<DynValue> m_Args;
 		int m_Count;
-		bool m_LastIsTuple = false;
+		bool m_LastIsTuple;
 
 		/// <summary>
 		/// Initializes a new instance of the <see cref="CallbackArguments" /> class.
@@ -20,8 +20,9 @@ namespace MoonSharp.Interpreter
 		public CallbackArguments(IList<DynValue> args, bool isMethodCall)
 		{
 			m_Args = args;
+		    m_LastIsTuple = false;
 
-			if (m_Args.Count > 0)
+            if (m_Args.Count > 0)
 			{
 				var last = m_Args[m_Args.Count - 1];
 
@@ -68,7 +69,9 @@ namespace MoonSharp.Interpreter
 		{
 			get
 			{
-				return RawGet(index, true) ?? DynValue.Void;
+			    var d = RawGet(index, true);
+
+                return  d.IsValid? d: DynValue.Void;
 			}
 		}
 
@@ -83,7 +86,7 @@ namespace MoonSharp.Interpreter
 			DynValue v;
 
 			if (index >= m_Count)
-				return null;
+				return DynValue.Invalid;
 
 			if (!m_LastIsTuple || index < m_Args.Count - 1)
 				v = m_Args[index];
@@ -139,6 +142,7 @@ namespace MoonSharp.Interpreter
 			return this[argNum].CheckType(funcName, type, argNum, allowNil ? TypeValidationFlags.AllowNil | TypeValidationFlags.AutoConvert : TypeValidationFlags.AutoConvert);
 		}
 
+        //TODO
 		/// <summary>
 		/// Gets the specified argument as as an argument of the specified user data type. If not possible,
 		/// an exception is raised.
@@ -179,20 +183,69 @@ namespace MoonSharp.Interpreter
 			return (long)d;
 		}
 
-
-		/// <summary>
-		/// Gets the specified argument as a string, calling the __tostring metamethod if needed, in a NON
-		/// yield-compatible way.
+        /// <summary>
+		/// Gets the specified argument as a float
 		/// </summary>
-		/// <param name="executionContext">The execution context.</param>
 		/// <param name="argNum">The argument number.</param>
 		/// <param name="funcName">Name of the function.</param>
 		/// <returns></returns>
-		/// <exception cref="ScriptRuntimeException">'tostring' must return a string to '{0}'</exception>
-		public string AsStringUsingMeta(ScriptExecutionContext executionContext, int argNum, string funcName)
+		public float AsFloat(int argNum, string funcName)
+        {
+            DynValue v = AsType(argNum, funcName, DataType.Number, false);
+            double d = v.Number;
+            return (float)d;
+        }
+
+        /// <summary>
+		/// Gets the specified argument as a bool
+		/// </summary>
+		/// <param name="argNum">The argument number.</param>
+		/// <param name="funcName">Name of the function.</param>
+		/// <returns></returns>
+		public bool AsBool(int argNum, string funcName)
+        {
+            DynValue v = AsType(argNum, funcName, DataType.Boolean, false);
+            return v.Boolean;
+        }
+
+        /// <summary>
+		/// Gets the specified argument as a string
+		/// </summary>
+		/// <param name="argNum">The argument number.</param>
+		/// <param name="funcName">Name of the function.</param>
+		/// <returns></returns>
+		public string AsString(int argNum, string funcName, bool allowNil = false)
+        {
+            DynValue v = AsType(argNum, funcName, DataType.String, allowNil);
+            return v.String;
+        }
+
+        /// <summary>
+		/// Gets the specified argument as a table
+		/// </summary>
+		/// <param name="argNum">The argument number.</param>
+		/// <param name="funcName">Name of the function.</param>
+		/// <returns></returns>
+		public Table AsTable(int argNum, string funcName, bool allowNil = false)
+        {
+            DynValue v = AsType(argNum, funcName, DataType.Table, allowNil);
+            return v.Table;
+        }
+
+
+        /// <summary>
+        /// Gets the specified argument as a string, calling the __tostring metamethod if needed, in a NON
+        /// yield-compatible way.
+        /// </summary>
+        /// <param name="executionContext">The execution context.</param>
+        /// <param name="argNum">The argument number.</param>
+        /// <param name="funcName">Name of the function.</param>
+        /// <returns></returns>
+        /// <exception cref="ScriptRuntimeException">'tostring' must return a string to '{0}'</exception>
+        public string AsStringUsingMeta(ScriptExecutionContext executionContext, int argNum, string funcName)
 		{
 			if ((this[argNum].Type == DataType.Table) && (this[argNum].Table.MetaTable != null) &&
-				(this[argNum].Table.MetaTable.RawGet("__tostring") != null))
+				(this[argNum].Table.MetaTable.RawGet("__tostring").IsValid))
 			{
 				var v = executionContext.GetScript().Call(this[argNum].Table.MetaTable.RawGet("__tostring"), this[argNum]);
 

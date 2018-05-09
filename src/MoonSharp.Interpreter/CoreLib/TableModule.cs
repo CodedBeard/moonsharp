@@ -84,11 +84,11 @@ namespace MoonSharp.Interpreter.CoreLib
 
 		private static int SortComparer(ScriptExecutionContext executionContext, DynValue a, DynValue b, DynValue lt)
 		{
-			if (lt == null || lt.IsNil())
+			if (lt.IsNil())
 			{
 				lt = executionContext.GetBinaryMetamethod(a, b, "__lt");
 
-				if (lt == null || lt.IsNil())
+				if (lt.IsNil())
 				{
 					if (a.Type == DataType.Number && b.Type == DataType.Number)
 						return a.Number.CompareTo(b.Number);
@@ -250,16 +250,16 @@ namespace MoonSharp.Interpreter.CoreLib
 		{
 			DynValue __len = executionContext.GetMetamethod(vlist, "__len");
 
-			if (__len != null)
+			if (__len.IsValid)
 			{
 				DynValue lenv = executionContext.GetScript().Call(__len, vlist);
 
-				double? len = lenv.CastToNumber();
+			    double len;
 
-				if (len == null)
-					throw new ScriptRuntimeException("object length is not a number");
+			    if (lenv.TryCastToNumber(out len))
+                    return (int) len;
 
-				return (int)len;
+			    throw new ScriptRuntimeException("object length is not a number");
 			}
 			else
 			{

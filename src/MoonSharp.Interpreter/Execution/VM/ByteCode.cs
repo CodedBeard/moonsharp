@@ -14,7 +14,7 @@ namespace MoonSharp.Interpreter.Execution.VM
 		public List<Instruction> Code = new List<Instruction>();
 		public Script Script { get; private set; }
 		private List<SourceRef> m_SourceRefStack = new List<SourceRef>();
-		private SourceRef m_CurrentSourceRef = null;
+		private SourceRef m_CurrentSourceRef = default(SourceRef);
 
 		internal LoopTracker LoopTracker = new LoopTracker();
 
@@ -56,7 +56,7 @@ namespace MoonSharp.Interpreter.Execution.VM
 		public void PopSourceRef()
 		{
 			m_SourceRefStack.RemoveAt(m_SourceRefStack.Count - 1);
-			m_CurrentSourceRef = (m_SourceRefStack.Count > 0) ? m_SourceRefStack[m_SourceRefStack.Count - 1] : null;
+			m_CurrentSourceRef = (m_SourceRefStack.Count > 0) ? m_SourceRefStack[m_SourceRefStack.Count - 1] : default(SourceRef);
 		}
 
 	#if (!PCL) && ((!UNITY_5) || UNITY_STANDALONE) && (!(NETFX_CORE))
@@ -221,7 +221,7 @@ namespace MoonSharp.Interpreter.Execution.VM
 			return AppendInstruction(new Instruction(m_CurrentSourceRef) { OpCode = OpCode.IterUpd });
 		}
 
-		public Instruction Emit_Meta(string funcName, OpCodeMetadataType metaType, DynValue value = null)
+		public Instruction Emit_Meta(string funcName, OpCodeMetadataType metaType, DynValue value = default(DynValue))
 		{
 			return AppendInstruction(new Instruction(m_CurrentSourceRef)
 			{
@@ -297,7 +297,7 @@ namespace MoonSharp.Interpreter.Execution.VM
 			return AppendInstruction(new Instruction(m_CurrentSourceRef) { OpCode = OpCode.TblInitI, NumVal = lastpos ? 1 : 0 });
 		}
 
-		public Instruction Emit_Index(DynValue index = null, bool isNameIndex = false, bool isExpList = false)
+		public Instruction Emit_Index(DynValue index = default(DynValue), bool isNameIndex = false, bool isExpList = false)
 		{
 			OpCode o;
 			if (isNameIndex) o = OpCode.IndexN;
@@ -307,7 +307,7 @@ namespace MoonSharp.Interpreter.Execution.VM
 			return AppendInstruction(new Instruction(m_CurrentSourceRef) { OpCode = o, Value = index });
 		}
 
-		public Instruction Emit_IndexSet(int stackofs, int tupleidx, DynValue index = null, bool isNameIndex = false, bool isExpList = false)
+		public Instruction Emit_IndexSet(int stackofs, int tupleidx, DynValue index = default(DynValue), bool isNameIndex = false, bool isExpList = false)
 		{
 			OpCode o;
 			if (isNameIndex) o = OpCode.IndexSetN;

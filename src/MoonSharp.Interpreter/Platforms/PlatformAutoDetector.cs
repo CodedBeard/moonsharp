@@ -92,7 +92,7 @@ namespace MoonSharp.Interpreter.Platforms
 					IsUnityIL2CPP = true;
 	#endif
 	#elif !(NETFX_CORE)
-			IsRunningOnUnity = AppDomain.CurrentDomain
+			IsRunningOnUnity = false & AppDomain.CurrentDomain
 				.GetAssemblies()
 				.SelectMany(a => a.SafeGetTypes())
 				.Any(t => t.FullName.StartsWith("UnityEngine."));
@@ -131,7 +131,7 @@ namespace MoonSharp.Interpreter.Platforms
 			AutoDetectPlatformFlags();
 
 			if (IsRunningOnUnity)
-				return new UnityAssetsScriptLoader();
+				return new FileSystemScriptLoader();
 			else
 			{
 #if (DOTNET_CORE)

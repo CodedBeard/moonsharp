@@ -18,7 +18,7 @@ namespace MoonSharp.Interpreter.Interop
 		{
 			Script s = new Script();
 			var exp = s.CreateDynamicExpression(serializedTableValue);
-			DynValue val = exp.Evaluate(null);
+			DynValue val = exp.Evaluate();
 
 			m_Value = val.Table.Get(1);
 			Name = name;
@@ -32,7 +32,7 @@ namespace MoonSharp.Interpreter.Interop
 		protected DynValueMemberDescriptor(string name)
 		{
 			MemberAccess = MemberDescriptorAccess.CanRead;
-			m_Value = null;
+			m_Value = DynValue.Invalid;
 			Name = name;
 		}
 
@@ -86,7 +86,7 @@ namespace MoonSharp.Interpreter.Interop
 		/// <returns>
 		/// The value of this member as a <see cref="DynValue" />.
 		/// </returns>
-		public DynValue GetValue(Script script, object obj)
+		public DynValue GetValue<T>(Script script, T obj)
 		{
 			return Value;
 		}
@@ -98,7 +98,7 @@ namespace MoonSharp.Interpreter.Interop
 		/// <param name="obj">The object owning this member, or null if static.</param>
 		/// <param name="value">The value to be set.</param>
 		/// <exception cref="ScriptRuntimeException">userdata '{0}' cannot be written to.</exception>
-		public void SetValue(Script script, object obj, DynValue value)
+		public void SetValue<T>(Script script, T obj, DynValue value)
 		{
 			throw new ScriptRuntimeException("userdata '{0}' cannot be written to.", this.Name);
 		}
@@ -135,7 +135,7 @@ namespace MoonSharp.Interpreter.Interop
 
 					break;
 				case DataType.UserData:
-					if (Value.UserData.Object == null)
+					if (!Value.UserData.HasValue())
 					{
 						t.Set("type", DynValue.NewString("userdata"));
 						t.Set("staticType", DynValue.NewString(Value.UserData.Descriptor.Type.FullName));

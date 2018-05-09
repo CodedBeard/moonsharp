@@ -325,16 +325,16 @@ namespace MoonSharp.Interpreter.Interop
 				if (i == method.Parameters.Length - 1 && method.VarArgsArrayType != null)
 				{
 					int varargCnt = 0;
-					DynValue firstArg = null;
+					DynValue firstArg = DynValue.Invalid;
 					int scoreBeforeVargars = totalScore;
 
 					// update score for varargs
 					while (true)
 					{
 						var arg = args.RawGet(argsCnt, false);
-						if (arg == null) break;
+						if (!arg.IsValid) break;
 
-						if (firstArg == null) firstArg = arg;
+						if (!firstArg.IsValid) firstArg = arg;
 
 						argsCnt += 1;
 
@@ -347,9 +347,9 @@ namespace MoonSharp.Interpreter.Interop
 					// check if exact-match
 					if (varargCnt == 1)
 					{
-						if (firstArg.Type == DataType.UserData && firstArg.UserData.Object != null)
+						if (firstArg.Type == DataType.UserData && firstArg.UserData.HasValue())
 						{
-							if (Framework.Do.IsAssignableFrom(method.VarArgsArrayType, firstArg.UserData.Object.GetType()))
+							if (firstArg.UserData.UnderlyingType.IsAssignableFrom(method.VarArgsArrayType))
 							{
 								totalScore = scoreBeforeVargars;
 								continue;
@@ -365,7 +365,9 @@ namespace MoonSharp.Interpreter.Interop
 				}
 				else
 				{
-					var arg = args.RawGet(argsCnt, false) ?? DynValue.Void;
+				    var arg = args.RawGet(argsCnt, false);
+                    if(!arg.IsValid)
+                        arg = DynValue.Void;
 
 					int score = CalcScoreForSingleArgument(method.Parameters[i], parameterType, arg, method.Parameters[i].HasDefaultValue);
 
@@ -468,7 +470,7 @@ namespace MoonSharp.Interpreter.Interop
 		/// <returns>
 		/// The value of this member as a <see cref="DynValue" />.
 		/// </returns>
-		public DynValue GetValue(Script script, object obj)
+		public DynValue GetValue<T>(Script script, T obj)
 		{
 			return DynValue.NewCallback(this.GetCallbackFunction(script, obj));
 		}
@@ -480,7 +482,7 @@ namespace MoonSharp.Interpreter.Interop
 		/// <param name="obj">The object owning this member, or null if static.</param>
 		/// <param name="value">The value to be set.</param>
 		/// <exception cref="System.NotImplementedException"></exception>
-		public void SetValue(Script script, object obj, DynValue value)
+		public void SetValue<T>(Script script, T obj, DynValue value)
 		{
 			this.CheckAccess(MemberDescriptorAccess.CanWrite, obj);
 		}

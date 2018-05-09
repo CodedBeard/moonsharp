@@ -60,11 +60,8 @@ namespace MoonSharp.Interpreter.CoreLib
 
 				if (v.Type == DataType.String)
 				{
-					double? nd = v.CastToNumber();
-					if (nd == null)
+					if (!v.TryCastToNumber(out d))
 						args.AsType(i, "char", DataType.Number, false);
-					else
-						d = nd.Value;
 				}
 				else
 				{
@@ -222,10 +219,64 @@ namespace MoonSharp.Interpreter.CoreLib
 		[MoonSharpModuleMethod]
 		public static DynValue format(ScriptExecutionContext executionContext, CallbackArguments args)
 		{
-			return executionContext.EmulateClassicCall(args, "format", KopiLua_StringLib.str_format);
-		}
+            string format = args.AsString(0, "format");
+            string toreturn;
+            if (args.Count == 1) toreturn = string.Format(format);
+            else if(args.Count == 2) toreturn = string.Format(format, args.RawGet(1, true).ToString());
+            else if(args.Count == 3) toreturn = string.Format(format, args.RawGet(1, true).ToString(), args.RawGet(2, true).ToString());
+            else if(args.Count == 4) toreturn = string.Format(format, args.RawGet(1, true).ToString(), args.RawGet(2, true).ToString(), args.RawGet(3, true).ToString());
+            else
+            {
+                string[] array = new string[args.Count - 1];
+                for (int i = 0; i != array.Length; i++)
+                {
+                    array[i] = args.RawGet(i + 1, true).ToString();
+                }
+                toreturn = string.Format(format, array);
+            }
+            return DynValue.NewString(toreturn);
+        }
 
+        private static string _castToString(DynValue dv)
+        {
+            if (dv.Type == DataType.String) return dv.String;
+            return dv.ToDebugPrintString();
+        }
 
+        [MoonSharpModuleMethod]
+        public static DynValue concat(ScriptExecutionContext executionContext, CallbackArguments args)
+        {
+            if (args.Count < 1) throw ScriptRuntimeException.BadArgumentValueExpected(0, "concat");
+
+            string toreturn = "";
+            if(args.Count == 1) toreturn = _castToString(args.RawGet(0, true));
+            else if (args.Count == 2) toreturn = _castToString(args.RawGet(0, true)) + _castToString(args.RawGet(1, true));
+            else if (args.Count == 3) toreturn = _castToString(args.RawGet(0, true)) + _castToString(args.RawGet(1, true)) + _castToString(args.RawGet(2, true));
+            else if (args.Count == 4) toreturn = _castToString(args.RawGet(0, true)) + _castToString(args.RawGet(1, true)) + _castToString(args.RawGet(2, true)) + _castToString(args.RawGet(3, true));
+            else
+            {
+                for (int i = 0; i != args.Count; i++)
+                {
+                    toreturn += _castToString(args.RawGet(i + 1, true));
+                }
+            }
+            return DynValue.NewString(toreturn);
+        }
+
+        [MoonSharpModuleMethod]
+        private static DynValue split(ScriptExecutionContext executionContext, CallbackArguments args)
+        {
+            string str = args.AsString(0, "split");
+            char split = args.AsString(1, "split")[0];
+
+            DynValue table = DynValue.NewTable(executionContext.OwnerScript);
+            string[] strs = str.Split(split);
+            for (int i = 0; i != strs.Length; i++)
+            {
+                table.Table.Set(i + 1, DynValue.NewString(strs[i]));
+            }
+            return table;
+        }
 
         [MoonSharpModuleMethod]
         public static DynValue reverse(ScriptExecutionContext executionContext, CallbackArguments args)

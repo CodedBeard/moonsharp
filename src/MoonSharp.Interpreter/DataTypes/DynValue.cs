@@ -3,29 +3,224 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Text;
+using MoonSharp.Interpreter.Interop.Converters;
 
 namespace MoonSharp.Interpreter
 {
-	/// <summary>
-	/// A class representing a value in a Lua/MoonSharp script.
-	/// </summary>
-	public sealed class DynValue
-	{
-		static int s_RefIDCounter = 0;
 
-		private int m_RefID = ++s_RefIDCounter;
-		private int m_HashCode = -1;
+    public static class HeapAllocatedDynValue
+    {
+        public const int HEAP_SIZE = 1024*1024*10;
 
-		private bool m_ReadOnly;
-		private double m_Number;
-		private object m_Object;
-		private DataType m_Type;
+        private static int _size = 0;
+        private static DynValue[] _heapAllocatedDynValue = new DynValue[HEAP_SIZE];
+        private static int[] _refCount = new int[HEAP_SIZE];
+        private static Stack<int> _emptySlots = new Stack<int>(1024*1024);
+
+        public static HashSet<int> FindCircularReferences()
+        {
+            //Array.Clear(_refCount, 0, _refCount.Length);
+            var result = new HashSet<int>();
+            var visited = new HashSet<object>();
+            var queue = new Queue<DynValue>();
+            for (var i = 0; i < _size; i++)
+            {
+                if (_refCount[i] <= 0) continue;
+                queue.Enqueue(_heapAllocatedDynValue[i]);
+            }
+            while (queue.Count > 0)
+            {
+                DynValue v = queue.Dequeue();
+
+                var o = v.Object;
+                if (o == null)
+                    continue;
+
+                if (!visited.Add(o))
+                    continue;
+
+                var f = v.Function;
+                if (f != null)
+                {
+                    var count = f.ClosureContext.Count;
+                    for (var j = 0; j < count; j++)
+                    {
+                        var index = f.ClosureContext[j].Index;
+                        //if (_refCount[index] > 0)
+                        result.Add(index);
+                    }
+                }
+
+                var table = v.Table;
+                if (table != null)
+                {
+                    foreach (var key in table.Keys)
+                        queue.Enqueue(key);
+                    foreach (var value in table.Values)
+                        queue.Enqueue(value);
+                }
+
+                var tuple = v.Tuple;
+                if (tuple != null)
+                {
+                    //foreach (var o in tuple.)
+                }
+            }
+            return result;
+        }
+
+        public static HashSet<int> FindDeadReferences()
+        {
+            //Array.Clear(_refCount, 0, _refCount.Length);
+            var result = new HashSet<int>();
+            for (var i = 0; i < _size; i++)
+            {
+                if (_refCount[i] <= 0) continue;
+                var f = _heapAllocatedDynValue[i].Function;
+                if (f != null && !f.isAlive)
+                    result.Add(i);
+                var t = _heapAllocatedDynValue[i].Table;
+                if (t != null && !t.isAlive)
+                    result.Add(i);
+            }
+            return result;
+        }
+
+        public static void FreeCircularReferences()
+        {
+            var refs = FindCircularReferences();
+            FreeReferences(refs);
+        }
+
+        public static void FreeDeadReferences()
+        {
+            var refs = FindDeadReferences();
+            FreeReferences(refs);
+        }
+
+        public static void FreeReferences(IEnumerable<int> refs)
+        {
+            lock (_emptySlots)
+            {
+                foreach (var i in refs)
+                {
+                    _refCount[i] = 0;
+                    _heapAllocatedDynValue[i] = default(DynValue);
+                    _emptySlots.Push(i);
+                }
+
+                // Recompact empty slots
+                var sortedSlots = new List<int>(_emptySlots);
+                sortedSlots.Sort();
+                var keep = sortedSlots.Count;
+                while (keep > 0)
+                {
+                    if (sortedSlots[keep - 1] != _size - 1)
+                        break;
+                    _size--;
+                    keep--;
+                }
+                _emptySlots.Clear();
+                for (var i = 0; i < keep; i++)
+                    _emptySlots.Push(sortedSlots[i]);
+            }
+        }
+
+        public static int Allocate()
+        {
+            int position;
+            lock (_emptySlots) {
+                position = _emptySlots.Count > 0 ? _emptySlots.Pop() : _size++;
+            }
+            _refCount[position] = 1;
+            return position;
+        }
 
 
-		/// <summary>
-		/// Gets a unique reference identifier. This is guaranteed to be unique only for dynvalues created in a single thread as it's not thread-safe.
-		/// </summary>
-		public int ReferenceID { get { return m_RefID; } }
+        public static int Allocate(ref DynValue v)
+        {
+            int position = Allocate();
+            _heapAllocatedDynValue[position] = v;
+            return position;
+        }
+
+        public static void Allocate(int[] array)
+        {
+            int position;
+            lock (_emptySlots)
+            {
+                for (int i = 0; i < array.Length; i++)
+                {
+                    array[i] = position = _emptySlots.Count > 0 ? _emptySlots.Pop() : _size++;
+                    _refCount[position] = 1;
+                }
+            }
+        }
+
+        public static void IncrementReferenceCount(int i)
+        {
+            lock (_emptySlots)
+                _refCount[i]++;
+        }
+
+        public static void DecreaseReferenceCount(int i)
+        {
+            lock (_emptySlots)
+            {
+                if (--_refCount[i] == 0)
+                {
+                    _heapAllocatedDynValue[i] = default(DynValue);
+                    _emptySlots.Push(i);
+                }
+            }
+        }
+
+        public static void DecreaseReferenceCount(int[] array)
+        {
+            for (int i = 0; i < array.Length; i++)
+            {
+                DecreaseReferenceCount(array[i]);
+            }
+        }
+
+        public static DynValue Get(int i)
+        {
+            return _heapAllocatedDynValue[i];
+        }
+
+        public static void Set(int i, ref DynValue value)
+        {
+            _heapAllocatedDynValue[i] = value;
+        }
+    }
+
+    /// <summary>
+    /// A class representing a value in a Lua/MoonSharp script.
+    /// </summary>
+//    [StructLayout(LayoutKind.Explicit)]
+    public struct DynValue : IEquatable<DynValue>
+    {
+        public static DynValue Invalid = default(DynValue);
+
+        private static int s_RefIDCounter = 0;
+
+//        [FieldOffset(0)]
+        private double m_Number;
+//        [FieldOffset(0)]
+        private object m_Object;
+//        [FieldOffset(8)]
+        public int m_RefID;
+//        [FieldOffset(12)]
+//        [MarshalAs(UnmanagedType.I1)]
+        private DataType m_Type;
+
+        internal object Object { get { return m_Object; } }
+
+
+        /// <summary>
+        /// Gets a unique reference identifier. This is guaranteed to be unique only for dynvalues created in a single thread as it's not thread-safe.
+        /// </summary>
+        public int ReferenceID { get { return m_RefID; } }
 
 		/// <summary>
 		/// Gets the type of the value.
@@ -75,21 +270,27 @@ namespace MoonSharp.Interpreter
 		/// <summary>
 		/// Gets the tail call data.
 		/// </summary>
-		public UserData UserData { get { return m_Object as UserData; } }
+		public IUserData UserData { get { return m_Object as IUserData; } }
 
-		/// <summary>
-		/// Returns true if this instance is write protected.
-		/// </summary>
-		public bool ReadOnly { get { return m_ReadOnly; } }
+        /// <summary>
+        /// Returns true if this instance is write protected.
+        /// </summary>
+        public bool IsValid { get { return m_RefID != 0; } }
 
+        internal static DynValue Request()
+	    {
+            var d = new DynValue();
+            d.m_Type = DataType.Invalid;
+            d.m_RefID = System.Threading.Interlocked.Increment(ref s_RefIDCounter);
+            return d;
+	    }
 
-
-		/// <summary>
-		/// Creates a new writable value initialized to Nil.
-		/// </summary>
-		public static DynValue NewNil()
+        /// <summary>
+        /// Creates a new writable value initialized to Nil.
+        /// </summary>
+        public static DynValue NewNil()
 		{
-			return new DynValue();
+			return Nil;
 		}
 
 		/// <summary>
@@ -97,11 +298,10 @@ namespace MoonSharp.Interpreter
 		/// </summary>
 		public static DynValue NewBoolean(bool v)
 		{
-			return new DynValue()
-			{
-				m_Number = v ? 1 : 0,
-				m_Type = DataType.Boolean,
-			};
+		    var d = Request();
+            d.m_Number = v ? 1 : 0;
+            d.m_Type = DataType.Boolean;
+		    return d;
 		}
 
 		/// <summary>
@@ -109,12 +309,10 @@ namespace MoonSharp.Interpreter
 		/// </summary>
 		public static DynValue NewNumber(double num)
 		{
-			return new DynValue()
-			{
-				m_Number = num,
-				m_Type = DataType.Number,
-				m_HashCode = -1,
-			};
+            var d = Request();
+            d.m_Number = num;
+            d.m_Type = DataType.Number;
+            return d;
 		}
 
 		/// <summary>
@@ -122,11 +320,10 @@ namespace MoonSharp.Interpreter
 		/// </summary>
 		public static DynValue NewString(string str)
 		{
-			return new DynValue()
-			{
-				m_Object = str,
-				m_Type = DataType.String,
-			};
+            var d = Request();
+            d.m_Object = str;
+            d.m_Type = DataType.String;
+            return d;
 		}
 
 		/// <summary>
@@ -134,11 +331,10 @@ namespace MoonSharp.Interpreter
 		/// </summary>
 		public static DynValue NewString(StringBuilder sb)
 		{
-			return new DynValue()
-			{
-				m_Object = sb.ToString(),
-				m_Type = DataType.String,
-			};
+            var d = Request();
+            d.m_Object = sb.ToString();
+            d.m_Type = DataType.String;
+            return d;
 		}
 
 		/// <summary>
@@ -146,11 +342,10 @@ namespace MoonSharp.Interpreter
 		/// </summary>
 		public static DynValue NewString(string format, params object[] args)
 		{
-			return new DynValue()
-			{
-				m_Object = string.Format(format, args),
-				m_Type = DataType.String,
-			};
+            var d = Request();
+            d.m_Object = string.Format(format, args);
+            d.m_Type = DataType.String;
+            return d;
 		}
 
 		/// <summary>
@@ -161,11 +356,10 @@ namespace MoonSharp.Interpreter
 		/// <returns></returns>
 		public static DynValue NewCoroutine(Coroutine coroutine)
 		{
-			return new DynValue()
-			{
-				m_Object = coroutine,
-				m_Type = DataType.Thread
-			};
+            var d = Request();
+            d.m_Object = coroutine;
+            d.m_Type = DataType.Thread;
+            return d;
 		}
 
 		/// <summary>
@@ -173,11 +367,10 @@ namespace MoonSharp.Interpreter
 		/// </summary>
 		public static DynValue NewClosure(Closure function)
 		{
-			return new DynValue()
-			{
-				m_Object = function,
-				m_Type = DataType.Function,
-			};
+            var d = Request();
+            d.m_Object = function;
+            d.m_Type = DataType.Function;
+            return d;
 		}
 
 		/// <summary>
@@ -185,11 +378,10 @@ namespace MoonSharp.Interpreter
 		/// </summary>
 		public static DynValue NewCallback(Func<ScriptExecutionContext, CallbackArguments, DynValue> callBack, string name = null)
 		{
-			return new DynValue()
-			{
-				m_Object = new CallbackFunction(callBack, name),
-				m_Type = DataType.ClrFunction,
-			};
+            var d = Request();
+            d.m_Object = new CallbackFunction(callBack, name);
+            d.m_Type = DataType.ClrFunction;
+            return d;
 		}
 
 		/// <summary>
@@ -198,11 +390,10 @@ namespace MoonSharp.Interpreter
 		/// </summary>
 		public static DynValue NewCallback(CallbackFunction function)
 		{
-			return new DynValue()
-			{
-				m_Object = function,
-				m_Type = DataType.ClrFunction,
-			};
+            var d = Request();
+            d.m_Object = function;
+            d.m_Type = DataType.ClrFunction;
+            return d;
 		}
 
 		/// <summary>
@@ -210,11 +401,10 @@ namespace MoonSharp.Interpreter
 		/// </summary>
 		public static DynValue NewTable(Table table)
 		{
-			return new DynValue()
-			{
-				m_Object = table,
-				m_Type = DataType.Table,
-			};
+            var d = Request();
+            d.m_Object = table;
+            d.m_Type = DataType.Table;
+            return d;
 		}
 
 		/// <summary>
@@ -243,6 +433,14 @@ namespace MoonSharp.Interpreter
 			return NewTable(new Table(script, arrayValues));
 		}
 
+        /// <summary>
+        /// Creates a new writable value initialized to with array contents.
+        /// </summary>
+        public static DynValue NewTable(Script script, List<DynValue> arrayValues)
+        {
+            return NewTable(new Table(script, arrayValues));
+        }
+
 		/// <summary>
 		/// Creates a new request for a tail call. This is the preferred way to execute Lua/MoonSharp code from a callback,
 		/// although it's not always possible to use it. When a function (callback or script closure) returns a
@@ -255,16 +453,15 @@ namespace MoonSharp.Interpreter
 		/// <returns></returns>
 		public static DynValue NewTailCallReq(DynValue tailFn, params DynValue[] args)
 		{
-			return new DynValue()
-			{
-				m_Object = new TailCallData()
-				{
-					Args = args,
-					Function = tailFn,
-				},
-				m_Type = DataType.TailCallRequest,
-			};
-		}
+            var d = Request();
+            d.m_Object = new TailCallData()
+            {
+                Args = args,
+                Function = tailFn,
+            };
+            d.m_Type = DataType.TailCallRequest;
+            return d;
+    	}
 
 		/// <summary>
 		/// Creates a new request for a tail call. This is the preferred way to execute Lua/MoonSharp code from a callback,
@@ -277,11 +474,10 @@ namespace MoonSharp.Interpreter
 		/// <returns></returns>
 		public static DynValue NewTailCallReq(TailCallData tailCallData)
 		{
-			return new DynValue()
-			{
-				m_Object = tailCallData,
-				m_Type = DataType.TailCallRequest,
-			};
+            var d = Request();
+            d.m_Object = tailCallData;
+            d.m_Type = DataType.TailCallRequest;
+		    return d;
 		}
 
 
@@ -293,11 +489,10 @@ namespace MoonSharp.Interpreter
 		/// <returns></returns>
 		public static DynValue NewYieldReq(DynValue[] args)
 		{
-			return new DynValue()
-			{
-				m_Object = new YieldRequest() { ReturnValues = args },
-				m_Type = DataType.YieldRequest,
-			};
+            var d = Request();
+            d.m_Object = new YieldRequest() { ReturnValues = args };
+            d.m_Type = DataType.YieldRequest;
+            return d;
 		}
 
 		/// <summary>
@@ -307,35 +502,80 @@ namespace MoonSharp.Interpreter
 		/// <returns></returns>
 		internal static DynValue NewForcedYieldReq()
 		{
-			return new DynValue()
-			{
-				m_Object = new YieldRequest() { Forced = true },
-				m_Type = DataType.YieldRequest,
-			};
-		}
+            var d = Request();
+            d.m_Object = new YieldRequest() { Forced = true };
+            d.m_Type = DataType.YieldRequest;
+            return d;
+        }
 
-		/// <summary>
-		/// Creates a new tuple initialized to the specified values.
-		/// </summary>
-		public static DynValue NewTuple(params DynValue[] values)
+        /// <summary>
+        /// Creates a new tuple initialized to the specified values.
+        /// </summary>
+        public static DynValue NewTuple(DynValue value)
+        {
+            return value;
+        }
+
+        /// <summary>
+        /// Creates a new tuple initialized to the specified values.
+        /// </summary>
+        public static DynValue NewTuple(DynValue value0, DynValue value1)
+        {
+            var array = PooledArray<DynValue>.Request(2);
+            array[0] = value0;
+            array[1] = value1;
+            return _NewTuple(array);
+        }
+
+        /// <summary>
+        /// Creates a new tuple initialized to the specified values.
+        /// </summary>
+        public static DynValue NewTuple(DynValue value0, DynValue value1, DynValue value2)
+        {
+            var array = PooledArray<DynValue>.Request(3);
+            array[0] = value0;
+            array[1] = value1;
+            array[2] = value2;
+            return _NewTuple(array);
+        }
+
+        /// <summary>
+        /// Creates a new tuple initialized to the specified values.
+        /// </summary>
+        public static DynValue NewTuple(DynValue value0, DynValue value1, DynValue value2, DynValue value3)
+        {
+            var array = PooledArray<DynValue>.Request(4);
+            array[0] = value0;
+            array[1] = value1;
+            array[2] = value2;
+            array[3] = value3;
+            return _NewTuple(array);
+        }
+
+        /// <summary>
+        /// Creates a new tuple initialized to the specified values.
+        /// </summary>
+        public static DynValue NewTuple(params DynValue[] values)
 		{
-			if (values.Length == 0)
-				return DynValue.NewNil();
-
-			if (values.Length == 1)
-				return values[0];
-
-			return new DynValue()
-			{
-				m_Object = values,
-				m_Type = DataType.Tuple,
-			};
+            if (values.Length == 0)
+                return NewNil();
+            if (values.Length == 1)
+                return values[0];
+            return _NewTuple(values);
 		}
 
-		/// <summary>
-		/// Creates a new tuple initialized to the specified values - which can be potentially other tuples
-		/// </summary>
-		public static DynValue NewTupleNested(params DynValue[] values)
+        internal static DynValue _NewTuple(DynValue[] values)
+        {
+            var d = Request();
+            d.m_Object = values;
+            d.m_Type = DataType.Tuple;
+            return d;
+        }
+
+        /// <summary>
+        /// Creates a new tuple initialized to the specified values - which can be potentially other tuples
+        /// </summary>
+        public static DynValue NewTupleNested(params DynValue[] values)
 		{
 			if (!values.Any(v => v.Type == DataType.Tuple))
 				return NewTuple(values);
@@ -353,73 +593,23 @@ namespace MoonSharp.Interpreter
 					vals.Add(v);
 			}
 
-			return new DynValue()
-			{
-				m_Object = vals.ToArray(),
-				m_Type = DataType.Tuple,
-			};
+            var d = Request();
+		    d.m_Object = vals.ToArray();
+		    d.m_Type = DataType.Tuple;
+		    return d;
 		}
 
 
 		/// <summary>
 		/// Creates a new userdata value
 		/// </summary>
-		public static DynValue NewUserData(UserData userData)
+		public static DynValue NewUserData(IUserData userData)
 		{
-			return new DynValue()
-			{
-				m_Object = userData,
-				m_Type = DataType.UserData,
-			};
+            var d = Request();
+            d.m_Object = userData;
+            d.m_Type = DataType.UserData;
+            return d;
 		}
-
-		/// <summary>
-		/// Returns this value as readonly - eventually cloning it in the process if it isn't readonly to start with.
-		/// </summary>
-		public DynValue AsReadOnly()
-		{
-			if (ReadOnly)
-				return this;
-			else
-			{
-				return Clone(true);
-			}
-		}
-
-		/// <summary>
-		/// Clones this instance.
-		/// </summary>
-		/// <returns></returns>
-		public DynValue Clone()
-		{
-			return Clone(this.ReadOnly);
-		}
-
-		/// <summary>
-		/// Clones this instance, overriding the "readonly" status.
-		/// </summary>
-		/// <param name="readOnly">if set to <c>true</c> the new instance is set as readonly, or writeable otherwise.</param>
-		/// <returns></returns>
-		public DynValue Clone(bool readOnly)
-		{
-			DynValue v = new DynValue();
-			v.m_Object = this.m_Object;
-			v.m_Number = this.m_Number;
-			v.m_HashCode = this.m_HashCode;
-			v.m_Type = this.m_Type;
-			v.m_ReadOnly = readOnly;
-			return v;
-		}
-
-		/// <summary>
-		/// Clones this instance, returning a writable copy.
-		/// </summary>
-		/// <exception cref="System.ArgumentException">Can't clone Symbol values</exception>
-		public DynValue CloneAsWritable()
-		{
-			return Clone(false);
-		}
-
 
 		/// <summary>
 		/// A preinitialized, readonly instance, equaling Void
@@ -441,11 +631,16 @@ namespace MoonSharp.Interpreter
 
 		static DynValue()
 		{
-			Nil = new DynValue() { m_Type = DataType.Nil }.AsReadOnly();
-			Void = new DynValue() { m_Type = DataType.Void }.AsReadOnly();
-			True = DynValue.NewBoolean(true).AsReadOnly();
-			False = DynValue.NewBoolean(false).AsReadOnly();
-		}
+            var nil = Request();
+            nil.m_Type = DataType.Nil;
+            Nil = nil;
+
+            var voidd = Request();
+            voidd.m_Type = DataType.Void;
+            Void = voidd;
+			True = NewBoolean(true);
+			False = NewBoolean(false);
+        }
 
 
 		/// <summary>
@@ -459,10 +654,10 @@ namespace MoonSharp.Interpreter
 
 				string typeString = this.Type.ToLuaTypeString();
 
-				if (m_Object is UserData)
+				if (m_Object is IUserData)
 				{
-					UserData ud = (UserData)m_Object;
-					string str = ud.Descriptor.AsString(ud.Object);
+					IUserData ud = (IUserData)m_Object;
+					string str = ud.AsString();
 					if (str != null)
 						return str;
 				}
@@ -496,14 +691,13 @@ namespace MoonSharp.Interpreter
 
 				string typeString = this.Type.ToLuaTypeString();
 
-				if (m_Object is UserData)
+				if (m_Object is IUserData)
 				{
-					UserData ud = (UserData)m_Object;
-					string str = ud.Descriptor.AsString(ud.Object);
+					IUserData ud = (IUserData)m_Object;
+					string str = ud.AsString();
 					if (str != null)
 						return str;
 				}
-
 				return refid.FormatTypeString(typeString);
 			}
 
@@ -556,7 +750,7 @@ namespace MoonSharp.Interpreter
 				case DataType.Thread:
 					return string.Format("(Coroutine {0:X8})", this.Coroutine.ReferenceID);
 				default:
-					return "(???)";
+					return "(null)";
 			}
 		}
 
@@ -568,12 +762,11 @@ namespace MoonSharp.Interpreter
 		/// </returns>
 		public override int GetHashCode()
 		{
-			if (m_HashCode != -1)
-				return m_HashCode;
-
 			int baseValue = ((int)(Type)) << 27;
 
-			switch (Type)
+		    int m_HashCode;
+
+            switch (Type)
 			{
 				case DataType.Void:
 				case DataType.Nil:
@@ -611,71 +804,74 @@ namespace MoonSharp.Interpreter
 			return m_HashCode;
 		}
 
-		/// <summary>
-		/// Determines whether the specified <see cref="System.Object" />, is equal to this instance.
-		/// </summary>
-		/// <param name="obj">The <see cref="System.Object" /> to compare with this instance.</param>
-		/// <returns>
-		///   <c>true</c> if the specified <see cref="System.Object" /> is equal to this instance; otherwise, <c>false</c>.
-		/// </returns>
-		public override bool Equals(object obj)
-		{
-			DynValue other = obj as DynValue;
 
-			if (other == null) return false;
+        public bool Equals(DynValue other)
+        {
+            if ((other.Type == DataType.Nil && this.Type == DataType.Void)
+                || (other.Type == DataType.Void && this.Type == DataType.Nil))
+                return true;
 
-			if ((other.Type == DataType.Nil && this.Type == DataType.Void)
-				|| (other.Type == DataType.Void && this.Type == DataType.Nil))
-				return true;
+            if (other.Type != this.Type) return false;
 
-			if (other.Type != this.Type) return false;
+            switch (Type)
+            {
+                case DataType.Void:
+                case DataType.Nil:
+                    return true;
+                case DataType.Boolean:
+                    return Boolean == other.Boolean;
+                case DataType.Number:
+                    return Number == other.Number;
+                case DataType.String:
+                    return String == other.String;
+                case DataType.Function:
+                    return Function == other.Function;
+                case DataType.ClrFunction:
+                    return Callback == other.Callback;
+                case DataType.Table:
+                    return Table == other.Table;
+                case DataType.Tuple:
+                case DataType.TailCallRequest:
+                    return Tuple == other.Tuple;
+                case DataType.Thread:
+                    return Coroutine == other.Coroutine;
+                case DataType.UserData:
+                    {
+                        IUserData ud1 = this.UserData;
+                        IUserData ud2 = other.UserData;
 
+                        if (ud1 == null || ud2 == null)
+                            return false;
 
-			switch (Type)
-			{
-				case DataType.Void:
-				case DataType.Nil:
-					return true;
-				case DataType.Boolean:
-					return Boolean == other.Boolean;
-				case DataType.Number:
-					return Number == other.Number;
-				case DataType.String:
-					return String == other.String;
-				case DataType.Function:
-					return Function == other.Function;
-				case DataType.ClrFunction:
-					return Callback == other.Callback;
-				case DataType.Table:
-					return Table == other.Table;
-				case DataType.Tuple:
-				case DataType.TailCallRequest:
-					return Tuple == other.Tuple;
-				case DataType.Thread:
-					return Coroutine == other.Coroutine;
-				case DataType.UserData:
-					{
-						UserData ud1 = this.UserData;
-						UserData ud2 = other.UserData;
+                        if (ud1.Descriptor != ud2.Descriptor)
+                            return false;
 
-						if (ud1 == null || ud2 == null)
-							return false;
+                        if (!ud1.HasValue() && !ud1.HasValue())
+                            return true;
 
-						if (ud1.Descriptor != ud2.Descriptor)
-							return false;
+                        if (ud1.HasValue() && ud1.HasValue())
+                            return ud1.Equals(ud2);
 
-						if (ud1.Object == null && ud2.Object == null)
-							return true;
+                        return false;
+                    }
+                default:
+                    return false;
+            }
+        }
 
-						if (ud1.Object != null && ud2.Object != null)
-							return ud1.Object.Equals(ud2.Object);
-
-						return false;
-					}
-				default:
-					return object.ReferenceEquals(this, other);
-			}
-		}
+        /// <summary>
+        /// Determines whether the specified <see cref="System.Object" />, is equal to this instance.
+        /// </summary>
+        /// <param name="obj">The <see cref="System.Object" /> to compare with this instance.</param>
+        /// <returns>
+        ///   <c>true</c> if the specified <see cref="System.Object" /> is equal to this instance; otherwise, <c>false</c>.
+        /// </returns>
+        public override bool Equals(object other)
+        {
+            if (other is DynValue)
+                return Equals((DynValue)other);
+            return false;
+        }
 
 
 		/// <summary>
@@ -700,20 +896,23 @@ namespace MoonSharp.Interpreter
 		/// Casts this DynValue to a double, using coercion if the type is string.
 		/// </summary>
 		/// <returns>The string representation, or null if not number, not string or non-convertible-string.</returns>
-		public double? CastToNumber()
+		public bool TryCastToNumber(out double d)
 		{
 			DynValue rv = ToScalar();
-			if (rv.Type == DataType.Number)
+		    bool castSuccessful = rv.Type == DataType.Number;
+			if(castSuccessful)
 			{
-				return rv.Number;
+				d = rv.Number;
 			}
 			else if (rv.Type == DataType.String)
 			{
-				double num;
-				if (double.TryParse(rv.String, NumberStyles.Any, CultureInfo.InvariantCulture, out num))
-					return num;
+			    castSuccessful = double.TryParse(rv.String, NumberStyles.Any, CultureInfo.InvariantCulture, out d);
 			}
-			return null;
+			else
+			{
+			    d = default(double);
+			}
+			return castSuccessful;
 		}
 
 
@@ -754,30 +953,12 @@ namespace MoonSharp.Interpreter
 			return Tuple[0].ToScalar();
 		}
 
-		/// <summary>
-		/// Performs an assignment, overwriting the value with the specified one.
-		/// </summary>
-		/// <param name="value">The value.</param>
-		/// <exception cref="ScriptRuntimeException">If the value is readonly.</exception>
-		public void Assign(DynValue value)
-		{
-			if (this.ReadOnly)
-				throw new ScriptRuntimeException("Assigning on r-value");
-
-			this.m_Number = value.m_Number;
-			this.m_Object = value.m_Object;
-			this.m_Type = value.Type;
-			this.m_HashCode = -1;
-		}
-
-
-
-		/// <summary>
-		/// Gets the length of a string or table value.
-		/// </summary>
-		/// <returns></returns>
-		/// <exception cref="ScriptRuntimeException">Value is not a table or string.</exception>
-		public DynValue GetLength()
+        /// <summary>
+        /// Gets the length of a string or table value.
+        /// </summary>
+        /// <returns></returns>
+        /// <exception cref="ScriptRuntimeException">Value is not a table or string.</exception>
+        public DynValue GetLength()
 		{
 			if (this.Type == DataType.Table)
 				return DynValue.NewNumber(this.Table.Length);
@@ -792,7 +973,7 @@ namespace MoonSharp.Interpreter
 		/// </summary>
 		public bool IsNil()
 		{
-			return this.Type == DataType.Nil || this.Type == DataType.Void;
+			return this.Type == DataType.Invalid || this.Type == DataType.Nil || this.Type == DataType.Void;
 		}
 
 		/// <summary>
@@ -800,7 +981,7 @@ namespace MoonSharp.Interpreter
 		/// </summary>
 		public bool IsNotNil()
 		{
-			return this.Type != DataType.Nil && this.Type != DataType.Void;
+			return this.Type != DataType.Invalid && this.Type != DataType.Nil && this.Type != DataType.Void;
 		}
 
 		/// <summary>
@@ -824,57 +1005,27 @@ namespace MoonSharp.Interpreter
 		/// </summary>
 		public bool IsNilOrNan()
 		{
-			return (this.Type == DataType.Nil) || (this.Type == DataType.Void) || (this.Type == DataType.Number && double.IsNaN(this.Number));
+			return (Type == DataType.Invalid) || (this.Type == DataType.Nil) || (this.Type == DataType.Void) || (this.Type == DataType.Number && double.IsNaN(this.Number));
 		}
 
-		/// <summary>
-		/// Changes the numeric value of a number DynValue.
-		/// </summary>
-		internal void AssignNumber(double num)
+        /// <summary>
+        /// Creates a new DynValue from a CLR genetic value
+        /// </summary>
+        /// <param name="script">The script.</param>
+        /// <param name="obj">The object.</param>
+        /// <returns></returns>
+        public static DynValue FromObject<T>(Script script, T value, bool readOnly = false)
+        {
+            DynValue dynValue = ClrToScriptConversions.GenericToDynValue<T>(script, value);
+            return dynValue;
+        }
+
+        /// <summary>
+        /// Converts this MoonSharp DynValue to a CLR object.
+        /// </summary>
+        public T ToObject<T>()
 		{
-			if (this.ReadOnly)
-				throw new InternalErrorException(null, "Writing on r-value");
-
-			if (this.Type != DataType.Number)
-				throw new InternalErrorException("Can't assign number to type {0}", this.Type);
-
-			this.m_Number = num;
-		}
-
-		/// <summary>
-		/// Creates a new DynValue from a CLR object
-		/// </summary>
-		/// <param name="script">The script.</param>
-		/// <param name="obj">The object.</param>
-		/// <returns></returns>
-		public static DynValue FromObject(Script script, object obj)
-		{
-			return MoonSharp.Interpreter.Interop.Converters.ClrToScriptConversions.ObjectToDynValue(script, obj);
-		}
-
-		/// <summary>
-		/// Converts this MoonSharp DynValue to a CLR object.
-		/// </summary>
-		public object ToObject()
-		{
-			return MoonSharp.Interpreter.Interop.Converters.ScriptToClrConversions.DynValueToObject(this);
-		}
-
-		/// <summary>
-		/// Converts this MoonSharp DynValue to a CLR object of the specified type.
-		/// </summary>
-		public object ToObject(Type desiredType)
-		{
-			//Contract.Requires(desiredType != null);
-			return MoonSharp.Interpreter.Interop.Converters.ScriptToClrConversions.DynValueToObjectOfType(this, desiredType, null, false);
-		}
-
-		/// <summary>
-		/// Converts this MoonSharp DynValue to a CLR object of the specified type.
-		/// </summary>
-		public T ToObject<T>()
-		{
-			return (T)ToObject(typeof(T));
+			return ScriptToClrConversions.DynValueToTypedValue(this, default(T), true);
 		}
 
 #if HASDYNAMIC
@@ -919,9 +1070,9 @@ namespace MoonSharp.Interpreter
 
 				if (desiredType == DataType.Number)
 				{
-					double? v = this.CastToNumber();
-					if (v.HasValue)
-						return DynValue.NewNumber(v.Value);
+					double v;
+					if (TryCastToNumber(out v))
+						return DynValue.NewNumber(v);
 				}
 
 				if (desiredType == DataType.String)
@@ -954,16 +1105,134 @@ namespace MoonSharp.Interpreter
 			if (v.IsNil())
 				return default(T);
 
-			object o = v.UserData.Object;
-			if (o != null && o is T)
-				return (T)o;
+		    T t;
+		    if (v.UserData.TryGet<T>(out t))
+		    {
+		        return t;
+		    }
 
-			throw ScriptRuntimeException.BadArgumentUserData(argNum, funcName, typeof(T), o, allowNil);
+			throw ScriptRuntimeException.BadArgumentUserData(argNum, funcName, typeof(T), t, allowNil);
 		}
+    }
 
-	}
+    public static class PooledArray<T>
+    {
+        private static T[] _zeroSized = new T[0];
+        private const int PoolSize = 5000;
+        private static readonly Stack<T[]> _oneSized = new Stack<T[]>(PoolSize);
+        private static readonly Stack<T[]> _twoSized = new Stack<T[]>(PoolSize);
+        private static readonly Stack<T[]> _threeSized = new Stack<T[]>(PoolSize);
+        private static readonly Stack<T[]> _fourSized = new Stack<T[]>(PoolSize);
+        private static readonly Stack<T[]> _fiveSized = new Stack<T[]>(PoolSize);
+        private static readonly Stack<T[]> _sixSized = new Stack<T[]>(PoolSize);
 
+        public static T[] Request(int i)
+        {
+            T[] array;
+            switch (i)
+            {
+                case 0:
+                    return _zeroSized;
+                case 1:
+                    lock (_oneSized)
+                    {
+                        array = _oneSized.Count == 0 ? new T[i] : _oneSized.Pop();
+                    }
+                    break;
+                case 2:
+                    lock (_twoSized)
+                    {
+                        array = _twoSized.Count == 0 ? new T[i] : _twoSized.Pop();
+                    }
+                    break;
+                case 3:
+                    lock (_threeSized)
+                    {
+                        array = _threeSized.Count == 0 ? new T[i] : _threeSized.Pop();
+                    }
+                    break;
+                case 4:
+                    lock (_fourSized)
+                    {
+                        array = _fourSized.Count == 0 ? new T[i] : _fourSized.Pop();
+                    }
+                    break;
+                case 5:
+                    lock (_fiveSized)
+                    {
+                        array = _fiveSized.Count == 0 ? new T[i] : _fiveSized.Pop();
+                    }
+                    break;
+                case 6:
+                    lock (_sixSized)
+                    {
+                        array = _sixSized.Count == 0 ? new T[i] : _sixSized.Pop();
+                    }
+                    break;
+                default:
+                    return new T[i];
+            }
+            return array;
+        }
 
-
-
+        public static void Release(T[] values)
+        {
+            switch (values.Length)
+            {
+                case 0:
+                    goto default;
+                case 1:
+                    lock (_oneSized)
+                    {
+                        if (_oneSized.Count >= PoolSize)
+                            return;
+                        _oneSized.Push(values);
+                    }
+                    break;
+                case 2:
+                    lock (_twoSized)
+                    {
+                        if (_twoSized.Count >= PoolSize)
+                            return;
+                        _twoSized.Push(values);
+                    }
+                    break;
+                case 3:
+                    lock (_threeSized)
+                    {
+                        if (_threeSized.Count >= PoolSize)
+                            return;
+                        _threeSized.Push(values);
+                    }
+                    break;
+                case 4:
+                    lock (_fourSized)
+                    {
+                        if (_fourSized.Count >= PoolSize)
+                            return;
+                        _fourSized.Push(values);
+                    }
+                    break;
+                case 5:
+                    lock (_fiveSized)
+                    {
+                        if (_fiveSized.Count >= PoolSize)
+                            return;
+                        _fiveSized.Push(values);
+                    }
+                    break;
+                case 6:
+                    lock (_sixSized)
+                    {
+                        if (_sixSized.Count >= PoolSize)
+                            return;
+                        _sixSized.Push(values);
+                    }
+                    break;
+                default:
+                    return;
+            }
+            Array.Clear(values, 0, values.Length);
+        }
+    }
 }

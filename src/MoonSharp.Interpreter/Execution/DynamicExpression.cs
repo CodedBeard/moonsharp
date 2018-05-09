@@ -29,18 +29,21 @@ namespace MoonSharp.Interpreter
 			m_Constant = constant;
 		}
 
+		public DynValue Evaluate()
+		{
+			return Evaluate(OwnerScript.CreateDynamicExecutionContext());
+		}
+
 		/// <summary>
 		/// Evaluates the expression
 		/// </summary>
 		/// <param name="context">The context.</param>
 		/// <returns></returns>
-		public DynValue Evaluate(ScriptExecutionContext context = null)
+		public DynValue Evaluate(ScriptExecutionContext context)
 		{
-			context = context ?? OwnerScript.CreateDynamicExecutionContext();
-
 			this.CheckScriptOwnership(context.GetScript());
 
-			if (m_Constant != null)
+			if (m_Constant.IsValid)
 				return m_Constant;
 
 			return m_Exp.Eval(context);
@@ -79,7 +82,7 @@ namespace MoonSharp.Interpreter
 		/// <returns></returns>
 		public bool IsConstant()
 		{
-			return m_Constant != null;
+			return m_Constant.IsValid;
 		}
 
 		/// <summary>
