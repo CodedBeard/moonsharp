@@ -396,7 +396,7 @@ namespace MoonSharp.Interpreter.Tests.EndToEnd
 				UserData.RegisterType<SomeClass>(opt);
 
 				Script.GlobalOptions.CustomConverters.Clear();
-
+                /*
 				Script.GlobalOptions.CustomConverters.SetScriptToClrCustomConversion(DataType.Table, typeof(List<string>),
                     (v, t) => null);
 
@@ -405,7 +405,7 @@ namespace MoonSharp.Interpreter.Tests.EndToEnd
 
 				Script.GlobalOptions.CustomConverters.SetScriptToClrCustomConversion(DataType.Table, typeof(int[]),
                     (v, t) => new int[] { 43, 78, 126, 14 });
-
+                    */
 				Script.GlobalOptions.CustomConverters.SetClrToScriptCustomConversion<StringBuilder>(
 					(_s, v) => DynValue.NewString(v.ToString().ToUpper()));
 
