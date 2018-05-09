@@ -6,75 +6,23 @@ namespace MoonSharp.Interpreter.Execution
 	/// <summary>
 	/// The scope of a closure (container of upvalues)
 	/// </summary>
-	internal struct ClosureContext
+	internal class ClosureContext : List<DynValue>
 	{
-	    private ClosureRefValue[] _closureRefs;
+		/// <summary>
+		/// Gets the symbols.
+		/// </summary>
+		public string[] Symbols { get; private set; }
 
-        internal ClosureContext(ClosureRefValue[] refs)
-        {
-            _closureRefs = refs;
-            for (int index = 0; index < _closureRefs.Length; index++)
-            {
-                _closureRefs[index].IncrementReferenceCount();
-            }
-        }
+		internal ClosureContext(SymbolRef[] symbols, IEnumerable<DynValue> values)
+		{
+			Symbols = symbols.Select(s => s.i_Name).ToArray();
+			this.AddRange(values);
+		}
 
-	    public bool IsEmpty() { return _closureRefs == null; }
+		internal ClosureContext()
+		{
+			Symbols = new string[0];
+		}
 
-        public ClosureRefValue this[int i]
-	    {
-	        get { return _closureRefs[i]; }
-        }
-
-        public int Count { get { return _closureRefs.Length;} }
-
-	    public void ReplaceWith(int i, ClosureRefValue refValue)
-	    {
-	        _closureRefs[i].DecreaseReferenceCount();
-            _closureRefs[i] = refValue;
-            refValue.IncrementReferenceCount();
-        }
-
-	    public void ReleaseValues()
-	    {
-            for (int index = 0; index < _closureRefs.Length; index++)
-            {
-                _closureRefs[index].DecreaseReferenceCount();
-            }
-        }
-    }
-
-    internal struct ClosureRefValue
-    {
-        public int index;
-        public SymbolRef Symbol;
-
-        internal int Index { get { return index; } }
-
-        public ClosureRefValue(SymbolRef s, int index)
-        {
-            this.index = index;
-            Symbol = s;
-        }
-
-        public DynValue Get()
-        {
-            return HeapAllocatedDynValue.Get(index);
-        }
-
-        public void Set(ref DynValue v)
-        {
-            HeapAllocatedDynValue.Set(index, ref v);
-        }
-
-        public void DecreaseReferenceCount()
-        {
-            HeapAllocatedDynValue.DecreaseReferenceCount(index);
-        }
-
-        public void IncrementReferenceCount()
-        {
-            HeapAllocatedDynValue.IncrementReferenceCount(index);
-        }
-    }
+	}
 }

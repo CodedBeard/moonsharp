@@ -20,10 +20,7 @@ namespace MoonSharp.Interpreter.CoreLib
 		private static Random GetRandom(Script s)
 		{
 			DynValue rr = s.Registry.Get("F61E3AA7247D4D1EB7A45430B0C8C9BB_MATH_RANDOM");
-		    AnonWrapper<Random> anonWrapper;
-		    if (rr.UserData.TryGet<AnonWrapper<Random>>(out anonWrapper))
-		        return anonWrapper.Value;
-            return null;
+			return (rr.UserData.Object as AnonWrapper<Random>).Value;
 		}
 
 		private static void SetRandom(Script s, Random random)

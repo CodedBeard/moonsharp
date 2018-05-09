@@ -85,7 +85,7 @@ namespace MoonSharp.Interpreter.Interop
 
 			Type elemType = array.GetType().GetElementType();
 
-			object objValue = ScriptToClrConversions.DynValueToTypedValue<object>(value, null, false);
+			object objValue = ScriptToClrConversions.DynValueToObjectOfType(value, elemType, null, false);
 
 			array.SetValue(objValue, indices);
 

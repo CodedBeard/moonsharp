@@ -14,7 +14,7 @@ namespace MoonSharp.Interpreter.CoreLib.IO
 		{
 			List<DynValue> readLines = new List<DynValue>();
 
-			DynValue readValue;
+			DynValue readValue = null;
 
 			do
 			{
@@ -211,7 +211,7 @@ namespace MoonSharp.Interpreter.CoreLib.IO
 		protected abstract string Close();
 
 		public abstract bool flush();
-		public abstract long seek(string whence, long offset = 0);
+		public abstract long seek(string whence, long offset);
 		public abstract bool setvbuf(string mode);
 
 		public override string ToString()

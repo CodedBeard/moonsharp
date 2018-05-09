@@ -10,14 +10,14 @@ namespace MoonSharp.Interpreter.Serialization
 {
 	public static class ObjectValueConverter
 	{
-		public static DynValue SerializeObjectToDynValue(Script script, object o, DynValue valueForNulls = default(DynValue))
+		public static DynValue SerializeObjectToDynValue(Script script, object o, DynValue valueForNulls = null)
 		{
 			if (o == null)
-				return valueForNulls.IsValid ? valueForNulls : DynValue.Nil;
+				return valueForNulls ?? DynValue.Nil;
 
 			DynValue v = ClrToScriptConversions.TryObjectToTrivialDynValue(script, o);
 
-			if (v.IsValid)
+			if (v != null)
 				return v;
 
 			if (o is Enum)

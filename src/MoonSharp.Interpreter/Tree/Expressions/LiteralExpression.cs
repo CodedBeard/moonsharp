@@ -27,11 +27,11 @@ namespace MoonSharp.Interpreter.Tree.Expressions
 				case TokenType.Number:
 				case TokenType.Number_Hex:
 				case TokenType.Number_HexFloat:
-					m_Value = DynValue.NewNumber(t.GetNumberValue());
+					m_Value = DynValue.NewNumber(t.GetNumberValue()).AsReadOnly();
 					break;
 				case TokenType.String:
 				case TokenType.String_Long:
-					m_Value = DynValue.NewString(t.Text);
+					m_Value = DynValue.NewString(t.Text).AsReadOnly();
 					break;
 				case TokenType.True:
 					m_Value = DynValue.True;
@@ -46,7 +46,7 @@ namespace MoonSharp.Interpreter.Tree.Expressions
 					throw new InternalErrorException("type mismatch");
 			}
 
-			if (!m_Value.IsValid)
+			if (m_Value == null)
 				throw new SyntaxErrorException(t, "unknown literal format near '{0}'", t.Text);
 
 			lcontext.Lexer.Next();

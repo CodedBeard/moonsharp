@@ -27,12 +27,10 @@ namespace MoonSharp.Interpreter.CoreLib
 			{
 				if (args[0].Type == DataType.UserData)
 				{
-					IUserData ud = args[0].UserData;
-
-					DynamicExprWrapper dew;
-					if (ud.TryGet(out dew))
+					UserData ud = args[0].UserData;
+					if (ud.Object is DynamicExprWrapper)
 					{
-						return dew.Expr.Evaluate(executionContext);
+						return ((DynamicExprWrapper)ud.Object).Expr.Evaluate(executionContext);
 					}
 					else
 					{

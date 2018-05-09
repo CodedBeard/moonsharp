@@ -185,41 +185,28 @@ namespace MoonSharp.Interpreter.Interop
 			List<int> outParams = null;
 			object[] pars = base.BuildArgumentList(script, obj, context, args, out outParams);
 			object retv = null;
-            bool worked = false;
 
 			if (m_OptimizedFunc != null)
 			{
-                try
-                {
-                    retv = m_OptimizedFunc(obj, pars);
-                }
-                catch (InvalidCastException ice)
-                {
-                    object targ = obj;
-                    if (obj.GetType() == typeof(UserDataRef))
-                    {
-                        targ = (obj as UserDataRef).GetRaw();
-                    }
-                    retv = MethodInfo.Invoke(targ, pars);
-                }
+				retv = m_OptimizedFunc(obj, pars);
 			}
-            else if (m_OptimizedAction != null)
-            {
-                m_OptimizedAction(obj, pars);
-                retv = DynValue.Void;
-            }
-            else if (m_IsAction)
-            {
-                MethodInfo.Invoke(obj, pars);
-                retv = DynValue.Void;
-            }
-            else
-            {
-                if (IsConstructor)
-                    retv = ((ConstructorInfo)MethodInfo).Invoke(pars);
-                else
-                    retv = MethodInfo.Invoke(obj, pars);
-            }
+			else if (m_OptimizedAction != null)
+			{
+				m_OptimizedAction(obj, pars);
+				retv = DynValue.Void;
+			}
+			else if (m_IsAction)
+			{
+				MethodInfo.Invoke(obj, pars);
+				retv = DynValue.Void;
+			}
+			else
+			{
+				if (IsConstructor)
+					retv = ((ConstructorInfo)MethodInfo).Invoke(pars);
+				else
+					retv = MethodInfo.Invoke(obj, pars);
+			}
 
 			return BuildReturnValue(script, outParams, pars, retv);
 		}
@@ -230,8 +217,7 @@ namespace MoonSharp.Interpreter.Interop
 		/// <exception cref="InternalErrorException">Out/Ref params cannot be precompiled.</exception>
 		void IOptimizableDescriptor.Optimize()
 		{
-#if !ONLY_AOT
-            ParameterDescriptor[] parameters = Parameters;
+			ParameterDescriptor[] parameters = Parameters;
 
 			if (AccessMode == InteropAccessMode.Reflection)
 				return;
@@ -286,8 +272,7 @@ namespace MoonSharp.Interpreter.Interop
 					Interlocked.Exchange(ref m_OptimizedFunc, lambda.Compile());
 				}
 			}
-#endif
-        }
+		}
 
 
 		/// <summary>

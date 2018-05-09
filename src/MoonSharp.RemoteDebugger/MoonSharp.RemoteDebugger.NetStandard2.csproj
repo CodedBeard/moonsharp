@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <AssemblyName>MoonSharp.RemoteDebugger</AssemblyName>
+    <RootNamespace>MoonSharp.RemoteDebugger</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\MoonSharp.Interpreter\MoonSharp.Interpreter.NetStandard2.csproj" />
+  </ItemGroup>
+
+</Project>

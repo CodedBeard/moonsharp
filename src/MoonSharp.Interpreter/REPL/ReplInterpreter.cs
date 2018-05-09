@@ -68,7 +68,7 @@ namespace MoonSharp.Interpreter.REPL
 
 			try
 			{
-				DynValue result;
+				DynValue result = null;
 
 				if (isFirstLine && HandleClassicExprsSyntax && m_CurrentCommand.StartsWith("="))
 				{
@@ -100,7 +100,7 @@ namespace MoonSharp.Interpreter.REPL
 				}
 				else
 				{
-					return DynValue.Invalid;
+					return null;
 				}
 			}
 			catch (ScriptRuntimeException sre)

@@ -1,6 +1,4 @@
 ﻿
-using System.Collections.Generic;
-
 namespace MoonSharp.Interpreter
 {
 	/// <summary>
@@ -19,7 +17,7 @@ namespace MoonSharp.Interpreter
 
 	internal static class ScriptPrivateResource_Extension
 	{
-		public static void CheckScriptOwnership(this IScriptPrivateResource containingResource,  IList<DynValue> values)
+		public static void CheckScriptOwnership(this IScriptPrivateResource containingResource,  DynValue[] values)
 		{
 			foreach (DynValue v in values)
 				CheckScriptOwnership(containingResource, v);
@@ -28,7 +26,7 @@ namespace MoonSharp.Interpreter
 
 		public static void CheckScriptOwnership(this IScriptPrivateResource containingResource, DynValue value)
 		{
-			if (value.IsValid)
+			if (value != null)
 			{
 				var otherResource = value.GetAsPrivateResource();
 

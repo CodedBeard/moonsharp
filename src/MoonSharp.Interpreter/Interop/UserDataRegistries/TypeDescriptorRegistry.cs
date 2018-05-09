@@ -249,19 +249,11 @@ namespace MoonSharp.Interpreter.Interop.UserDataRegistries
 			{
 				IUserDataDescriptor typeDescriptor = null;
 
-                // if the type has been explicitly registered, return its descriptor as it's complete
-                if (type.IsGenericType)
-                {
-                    IUserDataDescriptor iudd = null;
-                    if (s_TypeRegistry.TryGetValue(type.BaseType, out iudd)) { return iudd; }
-                }
-                else
-                {
-                    IUserDataDescriptor iudd = null;
-                    if (s_TypeRegistry.TryGetValue(type, out iudd)) { return iudd; }
-                }
+				// if the type has been explicitly registered, return its descriptor as it's complete
+				if (s_TypeRegistry.ContainsKey(type))
+					return s_TypeRegistry[type];
 
-                if (RegistrationPolicy.AllowTypeAutoRegistration(type))
+				if (RegistrationPolicy.AllowTypeAutoRegistration(type))
 				{
 					// no autoreg of delegates
 					if (!Framework.Do.IsAssignableFrom((typeof(Delegate)), type))
@@ -295,9 +287,15 @@ namespace MoonSharp.Interpreter.Interop.UserDataRegistries
 
 
 				// we should not search interfaces (for example, it's just for statics..), no need to look further
-				if (!searchInterfaces || typeDescriptor != null)
+				if (!searchInterfaces)
 					return typeDescriptor;
-                
+
+				List<IUserDataDescriptor> descriptors = new List<IUserDataDescriptor>();
+
+				if (typeDescriptor != null)
+					descriptors.Add(typeDescriptor);
+
+
 				if (searchInterfaces)
 				{
 					foreach (Type interfaceType in Framework.Do.GetInterfaces(type))
@@ -310,7 +308,7 @@ namespace MoonSharp.Interpreter.Interop.UserDataRegistries
 								interfaceDescriptor = ((IGeneratorUserDataDescriptor)interfaceDescriptor).Generate(type);
 
 							if (interfaceDescriptor != null)
-								return interfaceDescriptor;
+								descriptors.Add(interfaceDescriptor);
 						}
 						else if (Framework.Do.IsGenericType(interfaceType))
 						{
@@ -320,13 +318,18 @@ namespace MoonSharp.Interpreter.Interop.UserDataRegistries
 									interfaceDescriptor = ((IGeneratorUserDataDescriptor)interfaceDescriptor).Generate(type);
 
 								if (interfaceDescriptor != null)
-									return interfaceDescriptor;
+									descriptors.Add(interfaceDescriptor);
 							}
 						}
 					}
 				}
 
-				return null;
+				if (descriptors.Count == 1)
+					return descriptors[0];
+				else if (descriptors.Count == 0)
+					return null;
+				else
+					return new CompositeUserDataDescriptor(descriptors, type);
 			}
 		}
 

@@ -60,7 +60,7 @@ namespace MoonSharp.Interpreter.Interop
 			{
 				string name = names[i];
 				object value = values.GetValue(i);
-				DynValue cvalue = UserData.CreateWithDescriptor(value, this);
+				DynValue cvalue = UserData.Create(value, this);
 
 				base.AddDynValue(name, cvalue);
 			}
@@ -107,43 +107,35 @@ namespace MoonSharp.Interpreter.Interop
 			if (dv.Type == DataType.Number)
 				return (long)dv.Number;
 
-			if ((dv.Type != DataType.UserData) || (dv.UserData.Descriptor != this) || (!dv.UserData.HasValue()))
+			if ((dv.Type != DataType.UserData) || (dv.UserData.Descriptor != this) || (dv.UserData.Object == null))
 				throw new ScriptRuntimeException("Enum userdata or number expected, or enum is not of the correct type.");
 
-            long unsignedValue;
-            if (!dv.UserData.TryGet<long>(out unsignedValue))
-                throw new ScriptRuntimeException("Enum userdata or number expected, or enum is not of the correct type.");
+			return m_EnumToLong(dv.UserData.Object);
+		}
 
-            return unsignedValue;
-        }
-
-        /// <summary>
-        /// Gets the value of the enum as a ulong
-        /// </summary>
-        private ulong GetValueUnsigned(DynValue dv)
+		/// <summary>
+		/// Gets the value of the enum as a ulong
+		/// </summary>
+		private ulong GetValueUnsigned(DynValue dv)
 		{
 			CreateUnsignedConversionFunctions();
 
 			if (dv.Type == DataType.Number)
 				return (ulong)dv.Number;
 
-            if ((dv.Type != DataType.UserData) || (dv.UserData.Descriptor != this) || (!dv.UserData.HasValue()))
+			if ((dv.Type != DataType.UserData) || (dv.UserData.Descriptor != this) || (dv.UserData.Object == null))
 				throw new ScriptRuntimeException("Enum userdata or number expected, or enum is not of the correct type.");
 
-            ulong unsignedValue;
-		    if (!dv.UserData.TryGet<ulong>(out unsignedValue))
-		        throw new ScriptRuntimeException("Enum userdata or number expected, or enum is not of the correct type.");
-            
-		    return unsignedValue;
+			return m_EnumToULong(dv.UserData.Object);
 		}
 
-        /// <summary>
-        /// Creates an enum value from a long
-        /// </summary>
-        private DynValue CreateValueSigned(long value)
+		/// <summary>
+		/// Creates an enum value from a long
+		/// </summary>
+		private DynValue CreateValueSigned(long value)
 		{
 			CreateSignedConversionFunctions();
-			return UserData.CreateWithDescriptor(m_LongToEnum(value), this);
+			return UserData.Create(m_LongToEnum(value), this);
 		}
 
 		/// <summary>
@@ -152,7 +144,7 @@ namespace MoonSharp.Interpreter.Interop
 		private DynValue CreateValueUnsigned(ulong value)
 		{
 			CreateUnsignedConversionFunctions();
-			return UserData.CreateWithDescriptor(m_ULongToEnum(value), this);
+			return UserData.Create(m_ULongToEnum(value), this);
 		}
 
 		/// <summary>
@@ -321,7 +313,7 @@ namespace MoonSharp.Interpreter.Interop
 		/// <param name="type">The type.</param>
 		/// <param name="obj">The object.</param>
 		/// <returns></returns>
-		public override bool IsTypeCompatible(Type type, IUserData obj)
+		public override bool IsTypeCompatible(Type type, object obj)
 		{
 			if (obj != null)
 				return (Type == type);
@@ -338,12 +330,12 @@ namespace MoonSharp.Interpreter.Interop
 		/// <param name="obj"></param>
 		/// <param name="metaname"></param>
 		/// <returns></returns>
-		public override DynValue MetaIndex(Script script, IUserData obj, string metaname)
+		public override DynValue MetaIndex(Script script, object obj, string metaname)
 		{
 			if (metaname == "__concat" && IsFlags)
 				return DynValue.NewCallback(Callback_Or);
 
-			return DynValue.Invalid;
+			return null;
 		}
 	}
 }

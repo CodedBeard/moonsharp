@@ -46,7 +46,7 @@ namespace MoonSharp.Interpreter.Execution.VM
 
 
 
-		public DynValue Call(DynValue function, IList<DynValue> args)
+		public DynValue Call(DynValue function, DynValue[] args)
 		{
 			List<Processor> coroutinesStack = m_Parent != null ? m_Parent.m_CoroutinesStack : this.m_CoroutinesStack;
 
@@ -80,100 +80,37 @@ namespace MoonSharp.Interpreter.Execution.VM
 			}
 		}
 
-        public DynValue Call(DynValue function, DynValue arg1, DynValue arg2, DynValue arg3, DynValue arg4, DynValue metafunction = default(DynValue))
-        {
-            List<Processor> coroutinesStack = m_Parent != null ? m_Parent.m_CoroutinesStack : this.m_CoroutinesStack;
+		// pushes all what's required to perform a clr-to-script function call. function can be null if it's already
+		// at vstack top.
+		private int PushClrToScriptStackFrame(CallStackItemFlags flags, DynValue function, DynValue[] args)
+		{
+			if (function == null) 
+				function = m_ValueStack.Peek();
+			else
+				m_ValueStack.Push(function);  // func val
 
-            if (coroutinesStack.Count > 0 && coroutinesStack[coroutinesStack.Count - 1] != this)
-                return coroutinesStack[coroutinesStack.Count - 1].Call(function, arg1, arg2, arg3, arg4, metafunction);
+			args = Internal_AdjustTuple(args);
 
-            EnterProcessor();
+			for (int i = 0; i < args.Length; i++)
+				m_ValueStack.Push(args[i]);
 
-            try
-            {
-                var stopwatch = this.m_Script.PerformanceStats.StartStopwatch(Diagnostics.PerformanceCounter.Execution);
+			m_ValueStack.Push(DynValue.NewNumber(args.Length));  // func args count
 
-                m_CanYield = false;
+			m_ExecutionStack.Push(new CallStackItem()
+			{
+				BasePointer = m_ValueStack.Count,
+				Debug_EntryPoint = function.Function.EntryPointByteCodeLocation,
+				ReturnAddress = -1,
+				ClosureScope = function.Function.ClosureContext,
+				CallingSourceRef = SourceRef.GetClrLocation(),
+				Flags = flags
+			});
 
-                try
-                {
-                    int entrypoint = PushClrToScriptStackFrame(CallStackItemFlags.CallEntryPoint, function, arg1, arg2, arg3, arg4, metafunction);
-                    return Processing_Loop(entrypoint);
-                }
-                finally
-                {
-                    m_CanYield = true;
-
-                    if (stopwatch != null)
-                        stopwatch.Dispose();
-                }
-            }
-            finally
-            {
-                LeaveProcessor();
-            }
-        }
-
-        // pushes all what's required to perform a clr-to-script function call. function can be null if it's already
-        // at vstack top.
-        private int PushClrToScriptStackFrame(CallStackItemFlags flags, DynValue function, IList<DynValue> args)
-        {
-            if (!function.IsValid)
-                function = m_ValueStack.Peek();
-            else
-                m_ValueStack.Push(function);  // func val
-
-            args = Internal_AdjustTuple(args);
-
-            for (int i = 0; i < args.Count; i++)
-                m_ValueStack.Push(args[i]);
-
-            m_ValueStack.Push(DynValue.NewNumber(args.Count));  // func args count
-
-            m_ExecutionStack.Push(new CallStackItem()
-            {
-                BasePointer = m_ValueStack.Count,
-                Debug_EntryPoint = function.Function.EntryPointByteCodeLocation,
-                ReturnAddress = -1,
-                ClosureScope = function.Function.ClosureContext,
-                CallingSourceRef = SourceRef.GetClrLocation(),
-                Flags = flags
-            });
-
-            return function.Function.EntryPointByteCodeLocation;
-        }
-
-        private int PushClrToScriptStackFrame(CallStackItemFlags flags, DynValue function, DynValue arg1, DynValue arg2, DynValue arg3, DynValue arg4, DynValue metafunction = default(DynValue))
-        {
-            if (!function.IsValid)
-                function = m_ValueStack.Peek();
-            else
-                m_ValueStack.Push(function);  // func val
-
-            int pushed = 0;
-            if (metafunction.IsValid) { m_ValueStack.Push(metafunction); pushed++; }
-            if (arg1.IsValid) { m_ValueStack.Push(arg1); pushed++; }
-            if (arg2.IsValid) { m_ValueStack.Push(arg2); pushed++; }
-            if (arg3.IsValid) { m_ValueStack.Push(arg3); pushed++; }
-            if (arg4.IsValid) { m_ValueStack.Push(arg4); pushed++; }
-
-            m_ValueStack.Push(DynValue.NewNumber(pushed));  // func args count
-
-            m_ExecutionStack.Push(new CallStackItem()
-            {
-                BasePointer = m_ValueStack.Count,
-                Debug_EntryPoint = function.Function.EntryPointByteCodeLocation,
-                ReturnAddress = -1,
-                ClosureScope = function.Function.ClosureContext,
-                CallingSourceRef = SourceRef.GetClrLocation(),
-                Flags = flags
-            });
-
-            return function.Function.EntryPointByteCodeLocation;
-        }
+			return function.Function.EntryPointByteCodeLocation;
+		}
 
 
-        int m_OwningThreadID = -1;
+		int m_OwningThreadID = -1;
 		int m_ExecutionNesting = 0;
 
 		private void LeaveProcessor()

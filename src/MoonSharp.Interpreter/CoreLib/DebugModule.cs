@@ -36,7 +36,7 @@ namespace MoonSharp.Interpreter.CoreLib
 				{
 					DynValue result = interpreter.Evaluate(s);
 
-					if (result.IsValid && result.Type != DataType.Void)
+					if (result != null && result.Type != DataType.Void)
 						script.Options.DebugPrint(string.Format("{0}", result));
 				}
 				catch (InterpreterException ex)
@@ -58,9 +58,7 @@ namespace MoonSharp.Interpreter.CoreLib
 			if (v.Type != DataType.UserData)
 				return DynValue.Nil;
 
-		    var d = v.UserData.UserValue;
-
-            return  d.IsValid? d: DynValue.Nil;
+			return v.UserData.UserValue ?? DynValue.Nil;
 		}
 
 		[MoonSharpModuleMethod]
@@ -126,8 +124,8 @@ namespace MoonSharp.Interpreter.CoreLib
 				return DynValue.Nil;
 
 			return DynValue.NewTuple(
-				DynValue.NewString(closure[index].Symbol.Name),
-				closure[index].Get());
+				DynValue.NewString(closure.Symbols[index]),
+				closure[index]);
 		}
 
 
@@ -146,7 +144,7 @@ namespace MoonSharp.Interpreter.CoreLib
 			if (index < 0 || index >= closure.Count)
 				return DynValue.Nil;
 
-			return DynValue.NewNumber(closure[index].Get().ReferenceID);
+			return DynValue.NewNumber(closure[index].ReferenceID);
 		}
 
 
@@ -165,10 +163,9 @@ namespace MoonSharp.Interpreter.CoreLib
 			if (index < 0 || index >= closure.Count)
 				return DynValue.Nil;
 
-            var d = args[2];
-            closure[index].Set(ref d);
+			closure[index].Assign(args[2]);
 
-			return DynValue.NewString(closure[index].Symbol.Name);
+			return DynValue.NewString(closure.Symbols[index]);
 		}
 
 
@@ -189,10 +186,9 @@ namespace MoonSharp.Interpreter.CoreLib
 			if (n2 < 0 || n2 >= c2.ClosureContext.Count)
 				throw ScriptRuntimeException.BadArgument(3, "upvaluejoin", "invalid upvalue index");
 
-			var d = c1.ClosureContext[n1];
-            c2.ClosureContext.ReplaceWith(n2, c1.ClosureContext[n1]);
+			c2.ClosureContext[n2] = c1.ClosureContext[n1];
 
-            return DynValue.Void;
+			return DynValue.Void;
 		}
 
 
@@ -223,8 +219,7 @@ namespace MoonSharp.Interpreter.CoreLib
 
 			string message = vmessage.CastToString();
 
-		    double d;
-			int skip = (int)(vlevel.TryCastToNumber(out d)? d:defaultSkip);
+			int skip = (int)((vlevel.CastToNumber()) ?? defaultSkip);
 
 			WatchItem[] stacktrace = cor.GetStackTrace(Math.Max(0, skip));
 

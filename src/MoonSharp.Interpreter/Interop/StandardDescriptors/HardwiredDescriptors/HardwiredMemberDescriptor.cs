@@ -23,17 +23,17 @@ namespace MoonSharp.Interpreter.Interop.StandardDescriptors.HardwiredDescriptors
 		public MemberDescriptorAccess MemberAccess { get; private set; }
 
 
-		public DynValue GetValue<T>(Script script, T obj)
+		public DynValue GetValue(Script script, object obj)
 		{
 			this.CheckAccess(MemberDescriptorAccess.CanRead, obj);
 			object result = GetValueImpl(script, obj);
 			return ClrToScriptConversions.ObjectToDynValue(script, result);
 		}
 
-		public void SetValue<T>(Script script, T obj, DynValue value)
+		public void SetValue(Script script, object obj, DynValue value)
 		{
 			this.CheckAccess(MemberDescriptorAccess.CanWrite, obj);
-			object v = ScriptToClrConversions.DynValueToTypedValue<T>(value, default(T), false);
+			object v = ScriptToClrConversions.DynValueToObjectOfType(value, MemberType, null, false);
 			SetValueImpl(script, obj, v);
 		}
 

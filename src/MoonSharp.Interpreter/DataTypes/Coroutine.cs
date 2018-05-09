@@ -90,7 +90,7 @@ namespace MoonSharp.Interpreter
 		{
 			foreach(DynValue v in AsTypedEnumerable())
 			{
-				yield return v.ToScalar().ToObject<object>();
+				yield return v.ToScalar().ToObject();
 			}
 		}
 
@@ -252,7 +252,7 @@ namespace MoonSharp.Interpreter
 		/// <param name="skip">The skip.</param>
 		/// <param name="entrySourceRef">The entry source reference.</param>
 		/// <returns></returns>
-		public WatchItem[] GetStackTrace(int skip, SourceRef entrySourceRef = default(SourceRef))
+		public WatchItem[] GetStackTrace(int skip, SourceRef entrySourceRef = null)
 		{
 			if (this.State != CoroutineState.Running)
 			{

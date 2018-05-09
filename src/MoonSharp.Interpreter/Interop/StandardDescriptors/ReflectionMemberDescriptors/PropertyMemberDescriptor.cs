@@ -59,7 +59,7 @@ namespace MoonSharp.Interpreter.Interop
 		/// <param name="pi">The PropertyInfo.</param>
 		/// <param name="accessMode">The <see cref="InteropAccessMode" /></param>
 		/// <returns>A new StandardUserDataPropertyDescriptor or null.</returns>
-		public static PropertyMemberDescriptor TryCreateIfVisible(PropertyInfo pi, InteropAccessMode accessMode, bool forceVisibility = false)
+		public static PropertyMemberDescriptor TryCreateIfVisible(PropertyInfo pi, InteropAccessMode accessMode)
 		{
 			MethodInfo getter = Framework.Do.GetGetMethod(pi);
 			MethodInfo setter = Framework.Do.GetSetMethod(pi);
@@ -77,8 +77,8 @@ namespace MoonSharp.Interpreter.Interop
 			else 
 			{
 				return PropertyMemberDescriptor.TryCreate(pi, accessMode,
-                    (gvisible ?? getter.IsPublic) || forceVisibility ? getter : null,
-                    (svisible ?? setter.IsPublic) || forceVisibility ? setter : null);
+					(gvisible ?? getter.IsPublic) ? getter : null,
+					(svisible ?? setter.IsPublic) ? setter : null);
 			}
 		}
 
@@ -141,7 +141,7 @@ namespace MoonSharp.Interpreter.Interop
 		/// <param name="script">The script.</param>
 		/// <param name="obj">The object.</param>
 		/// <returns></returns>
-		public DynValue GetValue<T>(Script script, T obj)
+		public DynValue GetValue(Script script, object obj)
 		{
 			this.CheckAccess(MemberDescriptorAccess.CanRead, obj);
 
@@ -156,15 +156,14 @@ namespace MoonSharp.Interpreter.Interop
 			if (m_OptimizedGetter != null)
 				result = m_OptimizedGetter(obj);
 			else
-				result = m_Getter.Invoke(IsStatic ? default(T) : obj, null); // convoluted workaround for --full-aot Mono execution
+				result = m_Getter.Invoke(IsStatic ? null : obj, null); // convoluted workaround for --full-aot Mono execution
 
 			return ClrToScriptConversions.ObjectToDynValue(script, result);
 		}
 
 		internal void OptimizeGetter()
 		{
-#if !ONLY_AOT
-            using (PerformanceStatistics.StartGlobalStopwatch(PerformanceCounter.AdaptersCompilation))
+			using (PerformanceStatistics.StartGlobalStopwatch(PerformanceCounter.AdaptersCompilation))
 			{
 				if (m_Getter != null)
 				{
@@ -187,8 +186,7 @@ namespace MoonSharp.Interpreter.Interop
 					}
 				}
 			}
-#endif
-        }
+		}
 
 		internal void OptimizeSetter()
 		{
@@ -227,14 +225,14 @@ namespace MoonSharp.Interpreter.Interop
 		/// <param name="script">The script.</param>
 		/// <param name="obj">The object.</param>
 		/// <param name="v">The value to set.</param>
-		public void SetValue<T>(Script script, T obj, DynValue v)
+		public void SetValue(Script script, object obj, DynValue v)
 		{
 			this.CheckAccess(MemberDescriptorAccess.CanWrite, obj);
 
 			if (m_Setter == null)
 				throw new ScriptRuntimeException("userdata property '{0}.{1}' cannot be written to.", this.PropertyInfo.DeclaringType.Name, this.Name);
 
-			object value = ScriptToClrConversions.DynValueToObject(v);
+			object value = ScriptToClrConversions.DynValueToObjectOfType(v, this.PropertyInfo.PropertyType, null, false);
 
 			try
 			{
@@ -250,7 +248,7 @@ namespace MoonSharp.Interpreter.Interop
 				}
 				else
 				{
-					m_Setter.Invoke(IsStatic ? default(T) : obj, new object[] { value }); // convoluted workaround for --full-aot Mono execution
+					m_Setter.Invoke(IsStatic ? null : obj, new object[] { value }); // convoluted workaround for --full-aot Mono execution
 				}
 			}
 			catch (ArgumentException)

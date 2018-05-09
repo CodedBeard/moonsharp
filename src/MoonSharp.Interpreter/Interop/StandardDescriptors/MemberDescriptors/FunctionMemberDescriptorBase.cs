@@ -180,7 +180,7 @@ namespace MoonSharp.Interpreter.Interop
 					{
 						DynValue arg = args.RawGet(j, false);
 						j += 1;
-						if (arg.IsValid)
+						if (arg != null)
 							extraArgs.Add(arg);
 						else
 							break;
@@ -193,15 +193,12 @@ namespace MoonSharp.Interpreter.Interop
 					{
 						DynValue arg = extraArgs[0];
 
-						if (arg.Type == DataType.UserData && arg.UserData.HasValue())
+						if (arg.Type == DataType.UserData && arg.UserData.Object != null)
 						{
-
-							if (arg.UserData.UnderlyingType.IsAssignableFrom(VarArgsArrayType))
+							if (Framework.Do.IsAssignableFrom(VarArgsArrayType, arg.UserData.Object.GetType()))
 							{
-							    object o;
-								arg.UserData.TryGet(out o);
-							    pars[i] = o;
-                                continue;
+								pars[i] = arg.UserData.Object;
+								continue;
 							}
 						}
 					}
@@ -211,7 +208,8 @@ namespace MoonSharp.Interpreter.Interop
 
 					for (int ii = 0; ii < extraArgs.Count; ii++)
 					{
-						vararg.SetValue(ScriptToClrConversions.DynValueToTypedValue<object>(extraArgs[ii], null, false), ii);
+						vararg.SetValue(ScriptToClrConversions.DynValueToObjectOfType(extraArgs[ii], VarArgsElementType,
+						null, false), ii);
 					}
 
 					pars[i] = vararg;
@@ -220,10 +218,9 @@ namespace MoonSharp.Interpreter.Interop
 				// else, convert it
 				else
 				{
-				    var arg = args.RawGet(j, false);
-					if(!arg.IsValid)
-                        arg = DynValue.Void;
-					pars[i] = ScriptToClrConversions.DynValueToTypedValue<object>(arg, parameters[i].DefaultValue, parameters[i].HasDefaultValue);
+					var arg = args.RawGet(j, false) ?? DynValue.Void;
+					pars[i] = ScriptToClrConversions.DynValueToObjectOfType(arg, parameters[i].Type,
+						parameters[i].DefaultValue, parameters[i].HasDefaultValue);
 					j += 1;
 				}
 			}
@@ -288,7 +285,7 @@ namespace MoonSharp.Interpreter.Interop
 		/// <returns>
 		/// The value of this member as a <see cref="DynValue" />.
 		/// </returns>
-		public virtual DynValue GetValue<T>(Script script, T obj)
+		public virtual DynValue GetValue(Script script, object obj)
 		{
 			this.CheckAccess(MemberDescriptorAccess.CanRead, obj);
 			return this.GetCallbackAsDynValue(script, obj);
@@ -301,7 +298,7 @@ namespace MoonSharp.Interpreter.Interop
 		/// <param name="obj">The object.</param>
 		/// <param name="v">The v.</param>
 		/// <exception cref="System.NotImplementedException"></exception>
-		public virtual void SetValue<T>(Script script, T obj, DynValue v)
+		public virtual void SetValue(Script script, object obj, DynValue v)
 		{
 			this.CheckAccess(MemberDescriptorAccess.CanWrite, obj);
 		}

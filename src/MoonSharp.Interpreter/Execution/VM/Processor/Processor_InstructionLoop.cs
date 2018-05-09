@@ -198,10 +198,10 @@ namespace MoonSharp.Interpreter.Execution.VM
 						case OpCode.Local:
 							var scope = m_ExecutionStack.Peek().LocalScope;
 							var index = i.Symbol.i_Index;
-							m_ValueStack.Push(scope[index]);
+							m_ValueStack.Push(scope[index].AsReadOnly());
 							break;
 						case OpCode.Upvalue:
-							m_ValueStack.Push(m_ExecutionStack.Peek().ClosureScope[i.Symbol.i_Index].Get());
+							m_ValueStack.Push(m_ExecutionStack.Peek().ClosureScope[i.Symbol.i_Index].AsReadOnly());
 							break;
 						case OpCode.StoreUpv:
 							ExecStoreUpv(i);
@@ -271,7 +271,7 @@ namespace MoonSharp.Interpreter.Execution.VM
 				{
 					var c = m_ExecutionStack.Peek(i);
 
-					if (c.ErrorHandlerBeforeUnwind.IsValid)
+					if (c.ErrorHandlerBeforeUnwind != null)
 						ex.DecoratedMessage = PerformMessageDecorationBeforeUnwind(c.ErrorHandlerBeforeUnwind, ex.DecoratedMessage, GetCurrentSourceRef(instructionPtr));
 				}
 
@@ -295,7 +295,6 @@ namespace MoonSharp.Interpreter.Execution.VM
 						DynValue handled = csi.ErrorHandler.Invoke(new ScriptExecutionContext(this, csi.ErrorHandler, GetCurrentSourceRef(instructionPtr)), cbargs);
 
 						m_ValueStack.Push(handled);
-					    csi.Release();
 
 						goto repeat_execution;
 					}
@@ -354,8 +353,13 @@ namespace MoonSharp.Interpreter.Execution.VM
 
 		private void AssignLocal(SymbolRef symref, DynValue value)
 		{
-            var stackframe = m_ExecutionStack.Peek();
-            stackframe.LocalScope[symref.i_Index] = value;
+			var stackframe = m_ExecutionStack.Peek();
+
+			DynValue v = stackframe.LocalScope[symref.i_Index];
+			if (v == null)
+				stackframe.LocalScope[symref.i_Index] = v = DynValue.NewNil();
+
+			v.Assign(value);
 		}
 
 		private void ExecStoreLcl(Instruction i)
@@ -372,7 +376,12 @@ namespace MoonSharp.Interpreter.Execution.VM
 			SymbolRef symref = i.Symbol;
 
 			var stackframe = m_ExecutionStack.Peek();
-			stackframe.ClosureScope[symref.i_Index].Set(ref value);
+
+			DynValue v = stackframe.ClosureScope[symref.i_Index];
+			if (v == null)
+				stackframe.ClosureScope[symref.i_Index] = v = DynValue.NewNil();
+
+			v.Assign(value);
 		}
 
 		private void ExecSwap(Instruction i)
@@ -404,25 +413,17 @@ namespace MoonSharp.Interpreter.Execution.VM
 
 		private void ExecClosure(Instruction i)
 		{
-            ClosureRefValue[] values = new ClosureRefValue[i.SymbolList.Length];
-		    for (int index = 0; index < values.Length; index++)
-            { 
-		        values[index] = GetUpvalueSymbol(i.SymbolList[index]);
-            }
-
-            Closure c = new Closure(m_Script, i.NumVal, values);
+			Closure c = new Closure(this.m_Script, i.NumVal, i.SymbolList,
+				i.SymbolList.Select(s => this.GetUpvalueSymbol(s)).ToList());
 
 			m_ValueStack.Push(DynValue.NewClosure(c));
 		}
 
-		private ClosureRefValue GetUpvalueSymbol(SymbolRef s)
+		private DynValue GetUpvalueSymbol(SymbolRef s)
 		{
 			if (s.Type == SymbolRefType.Local)
-			{
-			    var csi = m_ExecutionStack.Peek();
-                return new ClosureRefValue(s, csi.LocalScope.IndexAt(s.Index));
-            }
-            else if (s.Type == SymbolRefType.Upvalue)
+				return m_ExecutionStack.Peek().LocalScope[s.i_Index];
+			else if (s.Type == SymbolRefType.Upvalue)
 				return m_ExecutionStack.Peek().ClosureScope[s.i_Index];
 			else
 				throw new Exception("unsupported symbol type");
@@ -441,9 +442,9 @@ namespace MoonSharp.Interpreter.Execution.VM
 
 		private void ExecToNum(Instruction i)
 		{
-			double v;
-			if (m_ValueStack.Pop().ToScalar().TryCastToNumber(out v))
-				m_ValueStack.Push(DynValue.NewNumber(v));
+			double? v = m_ValueStack.Pop().ToScalar().CastToNumber();
+			if (v.HasValue)
+				m_ValueStack.Push(DynValue.NewNumber(v.Value));
 			else
 				throw ScriptRuntimeException.ConvertToNumberFailed(i.NumVal);
 		}
@@ -493,7 +494,7 @@ namespace MoonSharp.Interpreter.Execution.VM
 			{
 				DynValue meta = this.GetMetamethod(f, "__iterator");
 
-				if (meta.IsNotNil())
+				if (meta != null && !meta.IsNil())
 				{
 					if (meta.Type != DataType.Tuple)
 						v = this.GetScript().Call(meta, f, s, var);
@@ -510,7 +511,7 @@ namespace MoonSharp.Interpreter.Execution.VM
 				{
 					DynValue callmeta = this.GetMetamethod(f, "__call");
 
-					if (callmeta.IsNotNil())
+					if (callmeta == null || callmeta.IsNil())
 					{
 						m_ValueStack.Push(EnumerableWrapper.ConvertTable(f.Table));
 					}
@@ -539,10 +540,20 @@ namespace MoonSharp.Interpreter.Execution.VM
 
 		private void ExecIncr(Instruction i)
 		{
-            DynValue btm = m_ValueStack.Peek(i.NumVal);
-            DynValue top = m_ValueStack.Pop();
+			DynValue top = m_ValueStack.Peek(0);
+			DynValue btm = m_ValueStack.Peek(i.NumVal);
 
-            m_ValueStack.Push(DynValue.NewNumber(top.Number + btm.Number));
+			if (top.ReadOnly)
+			{
+				m_ValueStack.Pop();
+
+				if (top.ReadOnly)
+					top = top.CloneAsWritable();
+
+				m_ValueStack.Push(top);
+			}
+
+			top.AssignNumber(top.Number + btm.Number);
 		}
 
 
@@ -568,12 +579,12 @@ namespace MoonSharp.Interpreter.Execution.VM
 
 		private void ExecBeginFn(Instruction i)
 		{
-			CallStackItem cur = m_ExecutionStack.Pop();
+			CallStackItem cur = m_ExecutionStack.Peek();
 
 			cur.Debug_Symbols = i.SymbolList;
-            cur.LocalScope = new LocalScope(i.NumVal);
+			cur.LocalScope = new DynValue[i.NumVal];
 
-            m_ExecutionStack.Push(cur);
+			ClearBlockData(i);
 		}
 
 		private CallStackItem PopToBasePointer()
@@ -593,35 +604,37 @@ namespace MoonSharp.Interpreter.Execution.VM
 			return xs.ReturnAddress;
 		}
 
-		private void PopulateArgsListForFunctionCall(IList<DynValue> values, int numargs, int offsFromTop)
+		private IList<DynValue> CreateArgsListForFunctionCall(int numargs, int offsFromTop)
 		{
-			if (numargs == 0) return;
+			if (numargs == 0) return new DynValue[0];
 
 			DynValue lastParam = m_ValueStack.Peek(offsFromTop);
 
 			if (lastParam.Type == DataType.Tuple && lastParam.Tuple.Length > 1)
 			{
+				List<DynValue> values = new List<DynValue>();
+
 				for (int idx = 0; idx < numargs - 1; idx++)
 					values.Add(m_ValueStack.Peek(numargs - idx - 1 + offsFromTop));
 
 				for (int idx = 0; idx < lastParam.Tuple.Length; idx++)
 					values.Add(lastParam.Tuple[idx]);
+
+				return values;
 			}
 			else
 			{
-				for (int idx = 0; idx < numargs; idx++)
-					values.Add(m_ValueStack.Peek(numargs - idx - 1 + offsFromTop));
+				return new Slice<DynValue>(m_ValueStack, m_ValueStack.Count - numargs - offsFromTop, numargs, false);
 			}
 		}
 
 
-        static readonly List<DynValue> argsList = new List<DynValue>(64);
 		private void ExecArgs(Instruction I)
 		{
 			int numargs = (int)m_ValueStack.Peek(0).Number;
 
 			// unpacks last tuple arguments to simplify a lot of code down under
-			PopulateArgsListForFunctionCall(argsList, numargs, 1);
+			var argsList = CreateArgsListForFunctionCall(numargs, 1);
 
 			for (int i = 0; i < I.SymbolList.Length; i++)
 			{
@@ -632,26 +645,27 @@ namespace MoonSharp.Interpreter.Execution.VM
 				else if ((i == I.SymbolList.Length - 1) && (I.SymbolList[i].i_Name == WellKnownSymbols.VARARGS))
 				{
 					int len = argsList.Count - i;
-					DynValue[] varargs = PooledArray<DynValue>.Request(len);
+					DynValue[] varargs = new DynValue[len];
 
 					for (int ii = 0; ii < len; ii++, i++)
 					{
-						varargs[ii] = argsList[i].ToScalar();
+						varargs[ii] = argsList[i].ToScalar().CloneAsWritable();
 					}
-				    var adjustedArgs = Internal_AdjustTuple(varargs);
-                    PooledArray<DynValue>.Release(varargs);
-                    this.AssignLocal(I.SymbolList[I.SymbolList.Length - 1], DynValue.NewTuple(adjustedArgs));
+
+					this.AssignLocal(I.SymbolList[I.SymbolList.Length - 1], DynValue.NewTuple(Internal_AdjustTuple(varargs)));
 				}
 				else
 				{
-					this.AssignLocal(I.SymbolList[i], argsList[i].ToScalar());
+					this.AssignLocal(I.SymbolList[i], argsList[i].ToScalar().CloneAsWritable());
 				}
 			}
-            argsList.Clear();
-        }
+		}
+
+
+
 
 		private int Internal_ExecCall(int argsCount, int instructionPtr, CallbackFunction handler = null,
-			CallbackFunction continuation = null, bool thisCall = false, string debugText = null, DynValue unwindHandler = default(DynValue))
+			CallbackFunction continuation = null, bool thisCall = false, string debugText = null, DynValue unwindHandler = null)
 		{
 			DynValue fn = m_ValueStack.Peek(argsCount);
 			CallStackItemFlags flags = (thisCall ? CallStackItemFlags.MethodCall : CallStackItemFlags.None);
@@ -672,7 +686,7 @@ namespace MoonSharp.Interpreter.Execution.VM
 
 						// if the current stack item has no "odd" things pending and neither has the new coming one..
 						if (csi.ClrFunction == null && csi.Continuation == null && csi.ErrorHandler == null
-							&& !csi.ErrorHandlerBeforeUnwind.IsValid && continuation == null && !unwindHandler.IsValid && handler == null)
+							&& csi.ErrorHandlerBeforeUnwind == null && continuation == null && unwindHandler == null && handler == null)
 						{
 							instructionPtr = PerformTCO(instructionPtr, argsCount);
 							flags |= CallStackItemFlags.TailCall;
@@ -682,10 +696,11 @@ namespace MoonSharp.Interpreter.Execution.VM
 			}
 
 
+
 			if (fn.Type == DataType.ClrFunction)
 			{
 				//IList<DynValue> args = new Slice<DynValue>(m_ValueStack, m_ValueStack.Count - argsCount, argsCount, false);
-				PopulateArgsListForFunctionCall(argsList, argsCount, 0);
+				IList<DynValue> args = CreateArgsListForFunctionCall(argsCount, 0);
 				// we expand tuples before callbacks
 				// args = DynValue.ExpandArgumentsToList(args);
 				SourceRef sref = GetCurrentSourceRef(instructionPtr);
@@ -702,14 +717,7 @@ namespace MoonSharp.Interpreter.Execution.VM
 					Flags = flags,
 				});
 
-				DynValue[] args = PooledArray<DynValue>.Request(argsCount);
-				for (int index = 0; index < argsList.Count; index++)
-					args[index] = argsList[index];
-				argsList.Clear();
-
 				var ret = fn.Callback.Invoke(new ScriptExecutionContext(this, fn.Callback, sref), args, isMethodCall: thisCall);
-                PooledArray<DynValue>.Release(args);
-
 				m_ValueStack.RemoveLast(argsCount + 1);
 				m_ValueStack.Push(ret);
 
@@ -738,7 +746,7 @@ namespace MoonSharp.Interpreter.Execution.VM
 			// fallback to __call metamethod
 			var m = GetMetamethod(fn, "__call");
 
-			if (m.IsNotNil())
+			if (m != null && m.IsNotNil())
 			{
 				DynValue[] tmp = new DynValue[argsCount + 1];
 				for (int i = 0; i < argsCount + 1; i++)
@@ -755,12 +763,13 @@ namespace MoonSharp.Interpreter.Execution.VM
 			throw ScriptRuntimeException.AttemptToCallNonFunc(fn.Type, debugText);
 		}
 
-        private readonly static List<DynValue> Args = new List<DynValue>(20); 
 		private int PerformTCO(int instructionPtr, int argsCount)
 		{
+			DynValue[] args = new DynValue[argsCount + 1];
+
 			// Remove all cur args and func ptr
 			for (int i = 0; i <= argsCount; i++)
-				Args[i] = m_ValueStack.Pop();
+				args[i] = m_ValueStack.Pop();
 
 			// perform a fake RET
 			CallStackItem csi = PopToBasePointer();
@@ -770,13 +779,9 @@ namespace MoonSharp.Interpreter.Execution.VM
 
 			// Re-push all cur args and func ptr
 			for (int i = argsCount; i >= 0; i--)
-				m_ValueStack.Push(Args[i]);
+				m_ValueStack.Push(args[i]);
 
-		    Args.Clear();
-
-            csi.Release();
-
-            return retpoint;
+			return retpoint;
 		}
 
 
@@ -798,7 +803,6 @@ namespace MoonSharp.Interpreter.Execution.VM
 			else if (i.NumVal == 1)
 			{
 				var retval = m_ValueStack.Pop();
-
 				csi = PopToBasePointer();
 				retpoint = csi.ReturnAddress;
 				var argscnt = (int)(m_ValueStack.Pop().Number);
@@ -812,16 +816,10 @@ namespace MoonSharp.Interpreter.Execution.VM
 			}
 
 			if (csi.Continuation != null)
-			{
-				var args = PooledArray<DynValue>.Request(1);
-				args[0] = m_ValueStack.Pop();
 				m_ValueStack.Push(csi.Continuation.Invoke(new ScriptExecutionContext(this, csi.Continuation, i.SourceCodeRef),
-					args));
-                PooledArray<DynValue>.Release(args);
-			}
-		    csi.Release();
+					new DynValue[1] { m_ValueStack.Pop() }));
 
-            return retpoint;
+			return retpoint;
 		}
 
 
@@ -888,12 +886,12 @@ namespace MoonSharp.Interpreter.Execution.VM
 			DynValue r = m_ValueStack.Pop().ToScalar();
 			DynValue l = m_ValueStack.Pop().ToScalar();
 
-			double rn;
-			double ln;
+			double? rn = r.CastToNumber();
+			double? ln = l.CastToNumber();
 
-			if (r.TryCastToNumber(out rn) && l.TryCastToNumber(out ln))
+			if (ln.HasValue && rn.HasValue)
 			{
-				m_ValueStack.Push(DynValue.NewNumber(ln + rn));
+				m_ValueStack.Push(DynValue.NewNumber(ln.Value + rn.Value));
 				return instructionPtr;
 			}
 			else
@@ -906,15 +904,15 @@ namespace MoonSharp.Interpreter.Execution.VM
 
 		private int ExecSub(Instruction i, int instructionPtr)
 		{
-            DynValue r = m_ValueStack.Pop().ToScalar();
-            DynValue l = m_ValueStack.Pop().ToScalar();
+			DynValue r = m_ValueStack.Pop().ToScalar();
+			DynValue l = m_ValueStack.Pop().ToScalar();
 
-            double rn;
-            double ln;
+			double? rn = r.CastToNumber();
+			double? ln = l.CastToNumber();
 
-            if (r.TryCastToNumber(out rn) && l.TryCastToNumber(out ln))
-            {
-				m_ValueStack.Push(DynValue.NewNumber(ln - rn));
+			if (ln.HasValue && rn.HasValue)
+			{
+				m_ValueStack.Push(DynValue.NewNumber(ln.Value - rn.Value));
 				return instructionPtr;
 			}
 			else
@@ -928,15 +926,15 @@ namespace MoonSharp.Interpreter.Execution.VM
 
 		private int ExecMul(Instruction i, int instructionPtr)
 		{
-            DynValue r = m_ValueStack.Pop().ToScalar();
-            DynValue l = m_ValueStack.Pop().ToScalar();
+			DynValue r = m_ValueStack.Pop().ToScalar();
+			DynValue l = m_ValueStack.Pop().ToScalar();
 
-            double rn;
-            double ln;
+			double? rn = r.CastToNumber();
+			double? ln = l.CastToNumber();
 
-            if (r.TryCastToNumber(out rn) && l.TryCastToNumber(out ln))
-            {
-				m_ValueStack.Push(DynValue.NewNumber(ln * rn));
+			if (ln.HasValue && rn.HasValue)
+			{
+				m_ValueStack.Push(DynValue.NewNumber(ln.Value * rn.Value));
 				return instructionPtr;
 			}
 			else
@@ -949,16 +947,16 @@ namespace MoonSharp.Interpreter.Execution.VM
 
 		private int ExecMod(Instruction i, int instructionPtr)
 		{
-            DynValue r = m_ValueStack.Pop().ToScalar();
-            DynValue l = m_ValueStack.Pop().ToScalar();
+			DynValue r = m_ValueStack.Pop().ToScalar();
+			DynValue l = m_ValueStack.Pop().ToScalar();
 
-            double rn;
-            double ln;
+			double? rn = r.CastToNumber();
+			double? ln = l.CastToNumber();
 
-            if (r.TryCastToNumber(out rn) && l.TryCastToNumber(out ln))
-            {
-				double mod = Math.IEEERemainder(ln, rn);
-				if (mod < 0) mod += rn;
+			if (ln.HasValue && rn.HasValue)
+			{
+				double mod = Math.IEEERemainder(ln.Value, rn.Value);
+				if (mod < 0) mod += rn.Value;
 				m_ValueStack.Push(DynValue.NewNumber(mod));
 				return instructionPtr;
 			}
@@ -975,12 +973,12 @@ namespace MoonSharp.Interpreter.Execution.VM
 			DynValue r = m_ValueStack.Pop().ToScalar();
 			DynValue l = m_ValueStack.Pop().ToScalar();
 
-            double rn;
-            double ln;
+			double? rn = r.CastToNumber();
+			double? ln = l.CastToNumber();
 
-            if (r.TryCastToNumber(out rn) && l.TryCastToNumber(out ln))
-            {
-				m_ValueStack.Push(DynValue.NewNumber(ln / rn));
+			if (ln.HasValue && rn.HasValue)
+			{
+				m_ValueStack.Push(DynValue.NewNumber(ln.Value / rn.Value));
 				return instructionPtr;
 			}
 			else
@@ -995,12 +993,12 @@ namespace MoonSharp.Interpreter.Execution.VM
 			DynValue r = m_ValueStack.Pop().ToScalar();
 			DynValue l = m_ValueStack.Pop().ToScalar();
 
-            double rn;
-            double ln;
+			double? rn = r.CastToNumber();
+			double? ln = l.CastToNumber();
 
-            if (r.TryCastToNumber(out rn) && l.TryCastToNumber(out ln))
-            {
-				m_ValueStack.Push(DynValue.NewNumber(Math.Pow(ln, rn)));
+			if (ln.HasValue && rn.HasValue)
+			{
+				m_ValueStack.Push(DynValue.NewNumber(Math.Pow(ln.Value, rn.Value)));
 				return instructionPtr;
 			}
 			else
@@ -1015,11 +1013,11 @@ namespace MoonSharp.Interpreter.Execution.VM
 		private int ExecNeg(Instruction i, int instructionPtr)
 		{
 			DynValue r = m_ValueStack.Pop().ToScalar();
-            double rn;
+			double? rn = r.CastToNumber();
 
-            if (r.TryCastToNumber(out rn))
-            {
-				m_ValueStack.Push(DynValue.NewNumber(-rn));
+			if (rn.HasValue)
+			{
+				m_ValueStack.Push(DynValue.NewNumber(-rn.Value));
 				return instructionPtr;
 			}
 			else
@@ -1210,14 +1208,14 @@ namespace MoonSharp.Interpreter.Execution.VM
 			bool isNameIndex = i.OpCode == OpCode.IndexSetN;
 			bool isMultiIndex = (i.OpCode == OpCode.IndexSetL);
 
-			DynValue originalIdx = i.Value.IsValid? i.Value : m_ValueStack.Pop();
+			DynValue originalIdx = i.Value ?? m_ValueStack.Pop();
 			DynValue idx = originalIdx.ToScalar();
 			DynValue obj = m_ValueStack.Pop().ToScalar();
 			var value = GetStoreValue(i);
-			DynValue h = DynValue.Invalid;
+			DynValue h = null;
 
 
-            while (nestedMetaOps > 0)
+			while (nestedMetaOps > 0)
 			{
 				--nestedMetaOps;
 
@@ -1234,7 +1232,7 @@ namespace MoonSharp.Interpreter.Execution.VM
 
 					h = GetMetamethodRaw(obj, "__newindex");
 
-					if (h.IsNil())
+					if (h == null || h.IsNil())
 					{
 						if (isMultiIndex) throw new ScriptRuntimeException("cannot multi-index a table. userdata expected");
 
@@ -1244,9 +1242,9 @@ namespace MoonSharp.Interpreter.Execution.VM
 				}
 				else if (obj.Type == DataType.UserData)
 				{
-					IUserData ud = obj.UserData;
+					UserData ud = obj.UserData;
 
-					if (!ud.Descriptor.SetIndex(this.GetScript(), ud, originalIdx, value, isNameIndex))
+					if (!ud.Descriptor.SetIndex(this.GetScript(), ud.Object, originalIdx, value, isNameIndex))
 					{
 						throw ScriptRuntimeException.UserDataMissingField(ud.Descriptor.Name, idx.String);
 					}
@@ -1257,7 +1255,7 @@ namespace MoonSharp.Interpreter.Execution.VM
 				{
 					h = GetMetamethodRaw(obj, "__newindex");
 
-					if (h.IsNil())
+					if (h == null || h.IsNil())
 						throw ScriptRuntimeException.IndexType(obj);
 				}
 
@@ -1275,7 +1273,7 @@ namespace MoonSharp.Interpreter.Execution.VM
 				else
 				{
 					obj = h;
-					h = DynValue.Invalid;
+					h = null;
 				}
 			}
 			throw ScriptRuntimeException.LoopInNewIndex();
@@ -1290,11 +1288,11 @@ namespace MoonSharp.Interpreter.Execution.VM
 
 			bool isMultiIndex = (i.OpCode == OpCode.IndexL);
 
-			DynValue originalIdx = i.Value.IsValid ? i.Value : m_ValueStack.Pop();
+			DynValue originalIdx = i.Value ?? m_ValueStack.Pop();
 			DynValue idx = originalIdx.ToScalar();
 			DynValue obj = m_ValueStack.Pop().ToScalar();
 
-			DynValue h = default(DynValue);
+			DynValue h = null;
 
 
 			while (nestedMetaOps > 0)
@@ -1309,14 +1307,14 @@ namespace MoonSharp.Interpreter.Execution.VM
 
 						if (!v.IsNil())
 						{
-							m_ValueStack.Push(v);
+							m_ValueStack.Push(v.AsReadOnly());
 							return instructionPtr;
 						}
 					}
 
 					h = GetMetamethodRaw(obj, "__index");
 
-					if (h.IsNil())
+					if (h == null || h.IsNil())
 					{
 						if (isMultiIndex) throw new ScriptRuntimeException("cannot multi-index a table. userdata expected");
 
@@ -1326,23 +1324,23 @@ namespace MoonSharp.Interpreter.Execution.VM
 				}
 				else if (obj.Type == DataType.UserData)
 				{
-					IUserData ud = obj.UserData;
+					UserData ud = obj.UserData;
 
-					var v = ud.Descriptor.Index(this.GetScript(), ud, originalIdx, isNameIndex);
+					var v = ud.Descriptor.Index(this.GetScript(), ud.Object, originalIdx, isNameIndex);
 
-					if (!v.IsValid)
+					if (v == null)
 					{
 						throw ScriptRuntimeException.UserDataMissingField(ud.Descriptor.Name, idx.String);
 					}
 
-					m_ValueStack.Push(v);
+					m_ValueStack.Push(v.AsReadOnly());
 					return instructionPtr;
 				}
 				else
 				{
 					h = GetMetamethodRaw(obj, "__index");
 
-					if (h.IsNil())
+					if (h == null || h.IsNil())
 						throw ScriptRuntimeException.IndexType(obj);
 				}
 
@@ -1357,7 +1355,7 @@ namespace MoonSharp.Interpreter.Execution.VM
 				else
 				{
 					obj = h;
-					h = DynValue.Invalid;
+					h = null;
 				}
 			}
 

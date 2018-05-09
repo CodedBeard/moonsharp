@@ -215,7 +215,7 @@ namespace MoonSharp.Interpreter.Interop.BasicDescriptors
 		/// <param name="index">The index.</param>
 		/// <param name="isDirectIndexing">If set to true, it's indexed with a name, if false it's indexed through brackets.</param>
 		/// <returns></returns>
-		public virtual DynValue Index(Script script, IUserData obj, DynValue index, bool isDirectIndexing)
+		public virtual DynValue Index(Script script, object obj, DynValue index, bool isDirectIndexing)
 		{
 			if (!isDirectIndexing)
 			{
@@ -224,27 +224,27 @@ namespace MoonSharp.Interpreter.Interop.BasicDescriptors
 					.WithAccessOrNull(MemberDescriptorAccess.CanExecute);
 
 				if (mdesc != null)
-					return ExecuteIndexer(mdesc, script, obj, index, DynValue.Invalid);
+					return ExecuteIndexer(mdesc, script, obj, index, null);
 			}
 
 			index = index.ToScalar();
 
 			if (index.Type != DataType.String)
-				return DynValue.Invalid;
+				return null;
 
 			DynValue v = TryIndex(script, obj, index.String);
-			if (!v.IsValid) v = TryIndex(script, obj, UpperFirstLetter(index.String));
-			if (!v.IsValid) v = TryIndex(script, obj, Camelify(index.String));
-			if (!v.IsValid) v = TryIndex(script, obj, UpperFirstLetter(Camelify(index.String)));
+			if (v == null) v = TryIndex(script, obj, UpperFirstLetter(index.String));
+			if (v == null) v = TryIndex(script, obj, Camelify(index.String));
+			if (v == null) v = TryIndex(script, obj, UpperFirstLetter(Camelify(index.String)));
 
-			if (!v.IsValid && m_ExtMethodsVersion < UserData.GetExtensionMethodsChangeVersion())
+			if (v == null && m_ExtMethodsVersion < UserData.GetExtensionMethodsChangeVersion())
 			{
 				m_ExtMethodsVersion = UserData.GetExtensionMethodsChangeVersion();
 
 				v = TryIndexOnExtMethod(script, obj, index.String);
-				if (!v.IsValid) v = TryIndexOnExtMethod(script, obj, UpperFirstLetter(index.String));
-				if (!v.IsValid) v = TryIndexOnExtMethod(script, obj, Camelify(index.String));
-				if (!v.IsValid) v = TryIndexOnExtMethod(script, obj, UpperFirstLetter(Camelify(index.String)));
+				if (v == null) v = TryIndexOnExtMethod(script, obj, UpperFirstLetter(index.String));
+				if (v == null) v = TryIndexOnExtMethod(script, obj, Camelify(index.String));
+				if (v == null) v = TryIndexOnExtMethod(script, obj, UpperFirstLetter(Camelify(index.String)));
 			}
 
 			return v;
@@ -271,7 +271,7 @@ namespace MoonSharp.Interpreter.Interop.BasicDescriptors
 				return DynValue.NewCallback(ext.GetCallback(script, obj));
 			}
 
-			return DynValue.Invalid;
+			return null;
 		}
 
 		/// <summary>
@@ -302,7 +302,7 @@ namespace MoonSharp.Interpreter.Interop.BasicDescriptors
 		/// <param name="obj">The object.</param>
 		/// <param name="indexName">Member name to be indexed.</param>
 		/// <returns></returns>
-		protected virtual DynValue TryIndex(Script script, IUserData obj, string indexName)
+		protected virtual DynValue TryIndex(Script script, object obj, string indexName)
 		{
 			IMemberDescriptor desc;
 
@@ -311,7 +311,7 @@ namespace MoonSharp.Interpreter.Interop.BasicDescriptors
 				return desc.GetValue(script, obj);
 			}
 
-			return DynValue.Invalid;
+			return null;
 		}
 
 		/// <summary>
@@ -323,7 +323,7 @@ namespace MoonSharp.Interpreter.Interop.BasicDescriptors
 		/// <param name="value">The value to be set</param>
 		/// <param name="isDirectIndexing">If set to true, it's indexed with a name, if false it's indexed through brackets.</param>
 		/// <returns></returns>
-		public virtual bool SetIndex(Script script, IUserData obj, DynValue index, DynValue value, bool isDirectIndexing)
+		public virtual bool SetIndex(Script script, object obj, DynValue index, DynValue value, bool isDirectIndexing)
 		{
 			if (!isDirectIndexing)
 			{
@@ -410,9 +410,9 @@ namespace MoonSharp.Interpreter.Interop.BasicDescriptors
 		/// </summary>
 		/// <param name="obj">The object.</param>
 		/// <returns></returns>
-		public virtual string AsString(IUserData obj)
+		public virtual string AsString(object obj)
 		{
-			return (obj != null) ? obj.AsString() : null;
+			return (obj != null) ? obj.ToString() : null;
 		}
 
 
@@ -433,7 +433,7 @@ namespace MoonSharp.Interpreter.Interop.BasicDescriptors
 
 			if (index.Type == DataType.Tuple)
 			{
-				if (!value.IsValid)
+				if (value == null)
 				{
 					values = index.Tuple;
 				}
@@ -445,7 +445,7 @@ namespace MoonSharp.Interpreter.Interop.BasicDescriptors
 			}
 			else
 			{
-				if (value.IsValid)
+				if (value == null)
 				{
 					values = new DynValue[] { index };
 				}
@@ -490,7 +490,7 @@ namespace MoonSharp.Interpreter.Interop.BasicDescriptors
 		/// <param name="metaname">The name of the metamember.</param>
 		/// </summary>
 		/// <returns></returns>
-		public virtual DynValue MetaIndex(Script script, IUserData obj, string metaname)
+		public virtual DynValue MetaIndex(Script script, object obj, string metaname)
 		{
 			IMemberDescriptor desc = m_MetaMembers.GetOrDefault(metaname);
 
@@ -528,7 +528,7 @@ namespace MoonSharp.Interpreter.Interop.BasicDescriptors
 				case "__iterator":
 					return ClrToScriptConversions.EnumerationToDynValue(script, obj);
 				default:
-					return DynValue.Invalid;
+					return null;
 			}
 		}
 
@@ -558,10 +558,10 @@ namespace MoonSharp.Interpreter.Interop.BasicDescriptors
 			{
 				return DynValue.NewCallback(
 					(context, args) =>
-						DynValue.NewBoolean(PerformComparison(obj, args[0].ToObject<object>(), args[1].ToObject<object>()) <= 0));
+						DynValue.NewBoolean(PerformComparison(obj, args[0].ToObject(), args[1].ToObject()) <= 0));
 			}
 
-			return DynValue.Invalid;
+			return null;
 		}
 
 		private DynValue MultiDispatchLessThan(Script script, object obj)
@@ -571,15 +571,15 @@ namespace MoonSharp.Interpreter.Interop.BasicDescriptors
 			{
 				return DynValue.NewCallback(
 					(context, args) =>
-						DynValue.NewBoolean(PerformComparison(obj, args[0].ToObject<object>(), args[1].ToObject<object>()) < 0));
+						DynValue.NewBoolean(PerformComparison(obj, args[0].ToObject(), args[1].ToObject()) < 0));
 			}
 
-			return DynValue.Invalid;
+			return null;
 		}
 
 		private DynValue TryDispatchLength(Script script, object obj)
 		{
-			if (obj == null) return DynValue.Invalid;
+			if (obj == null) return null;
 
 			var lenprop = m_Members.GetOrDefault("Length");
 			if (lenprop != null && lenprop.CanRead() && !lenprop.CanExecute()) return lenprop.GetGetterCallbackAsDynValue(script, obj);
@@ -587,14 +587,14 @@ namespace MoonSharp.Interpreter.Interop.BasicDescriptors
 			var countprop = m_Members.GetOrDefault("Count");
 			if (countprop != null && countprop.CanRead() && !countprop.CanExecute()) return countprop.GetGetterCallbackAsDynValue(script, obj);
 
-			return DynValue.Invalid;
+			return null;
 		}
 
 
 		private DynValue MultiDispatchEqual(Script script, object obj)
 		{
 			return DynValue.NewCallback(
-				(context, args) => DynValue.NewBoolean(CheckEquality(obj, args[0].ToObject<object>(), args[1].ToObject<object>())));
+				(context, args) => DynValue.NewBoolean(CheckEquality(obj, args[0].ToObject(), args[1].ToObject())));
 		}
 
 
@@ -622,7 +622,7 @@ namespace MoonSharp.Interpreter.Interop.BasicDescriptors
 				return desc.GetValue(script, obj);
 			}
 			else
-				return DynValue.Invalid;
+				return null;
 		}
 
 
@@ -632,9 +632,9 @@ namespace MoonSharp.Interpreter.Interop.BasicDescriptors
 			{
 				var name = t.GetConversionMethodName();
 				var v = DispatchMetaOnMethod(script, obj, name);
-				if (v.IsValid) return v;
+				if (v != null) return v;
 			}
-			return DynValue.Invalid;
+			return null;
 		}
 
 
@@ -642,7 +642,7 @@ namespace MoonSharp.Interpreter.Interop.BasicDescriptors
 		{
 			var name = typeof(bool).GetConversionMethodName();
 			var v = DispatchMetaOnMethod(script, obj, name);
-			if (v.IsValid) return v;
+			if (v != null) return v;
 			return DispatchMetaOnMethod(script, obj, "op_True");
 		}
 
@@ -657,9 +657,9 @@ namespace MoonSharp.Interpreter.Interop.BasicDescriptors
 		/// <param name="type">The type.</param>
 		/// <param name="obj">The object.</param>
 		/// <returns></returns>
-		public virtual bool IsTypeCompatible(Type type, IUserData obj)
+		public virtual bool IsTypeCompatible(Type type, object obj)
 		{
-			return obj.UnderlyingType.IsAssignableFrom(type);
+			return Framework.Do.IsInstanceOfType(type, obj);
 		}
 	}
 }

@@ -60,16 +60,16 @@ namespace MoonSharp.Interpreter.Interop
 		/// <param name="index">The index.</param>
 		/// <param name="isDirectIndexing">If set to true, it's indexed with a name, if false it's indexed through brackets.</param>
 		/// <returns></returns>
-		public DynValue Index(Script script, IUserData obj, DynValue index, bool isNameIndex)
+		public DynValue Index(Script script, object obj, DynValue index, bool isNameIndex)
 		{
 			foreach (IUserDataDescriptor dd in m_Descriptors)
 			{
 				DynValue v = dd.Index(script, obj, index, isNameIndex);
 
-				if (v.IsValid)
+				if (v != null)
 					return v;
 			}
-			return DynValue.Invalid;
+			return null;
 		}
 
 		/// <summary>
@@ -81,7 +81,7 @@ namespace MoonSharp.Interpreter.Interop
 		/// <param name="value">The value to be set</param>
 		/// <param name="isDirectIndexing">If set to true, it's indexed with a name, if false it's indexed through brackets.</param>
 		/// <returns></returns>
-		public bool SetIndex(Script script, IUserData obj, DynValue index, DynValue value, bool isNameIndex)
+		public bool SetIndex(Script script, object obj, DynValue index, DynValue value, bool isNameIndex)
 		{
 			foreach (IUserDataDescriptor dd in m_Descriptors)
 			{
@@ -96,7 +96,7 @@ namespace MoonSharp.Interpreter.Interop
 		/// </summary>
 		/// <param name="obj">The object.</param>
 		/// <returns></returns>
-		public string AsString(IUserData obj)
+		public string AsString(object obj)
 		{
 			return (obj != null) ? obj.ToString() : null;
 		}
@@ -116,16 +116,16 @@ namespace MoonSharp.Interpreter.Interop
 		/// <param name="obj">The object (null if a static request is done)</param>
 		/// <param name="metaname">The name of the metamember.</param>
 		/// <returns></returns>
-		public DynValue MetaIndex(Script script, IUserData obj, string metaname)
+		public DynValue MetaIndex(Script script, object obj, string metaname)
 		{
 			foreach (IUserDataDescriptor dd in m_Descriptors)
 			{
 				DynValue v = dd.MetaIndex(script, obj, metaname);
 
-				if (v.IsValid)
+				if (v != null)
 					return v;
 			}
-			return DynValue.Invalid;
+			return null;
 		}
 
 
@@ -137,9 +137,9 @@ namespace MoonSharp.Interpreter.Interop
 		/// <param name="type">The type.</param>
 		/// <param name="obj">The object.</param>
 		/// <returns></returns>
-		public bool IsTypeCompatible(Type type, IUserData obj)
+		public bool IsTypeCompatible(Type type, object obj)
 		{
-			return Framework.Do.IsInstanceOfType(type, obj.UnderlyingType);
+			return Framework.Do.IsInstanceOfType(type, obj);
 		}
 	}
 }
