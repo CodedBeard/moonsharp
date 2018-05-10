@@ -1,0 +1,227 @@
+﻿using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using Xunit;
+
+namespace MoonSharp.Interpreter.Tests.EndToEnd
+{
+	
+	public class GotoTests
+	{
+		[Fact]
+		public void Goto_Simple_Fwd()
+		{
+			string script = @"
+				function test()
+					x = 3
+					goto skip	
+					x = x + 2;
+					::skip::
+					return x;
+				end				
+
+				return test();
+				";
+
+			DynValue res = Script.RunString(script);
+
+			Assert.Equal(DataType.Number, res.Type);
+			Assert.Equal(3, res.Number);
+		}
+
+		[Fact]
+		public void Goto_Simple_Bwd()
+		{
+			string script = @"
+				function test()
+					x = 5;
+	
+					::jump::
+					if (x == 3) then return x; end
+					
+					x = 3
+					goto jump
+
+					x = 4
+					return x;
+				end				
+
+				return test();
+				";
+
+			DynValue res = Script.RunString(script);
+
+			Assert.Equal(DataType.Number, res.Type);
+			Assert.Equal(3, res.Number);
+		}
+
+		[Fact]
+		public void Goto_UndefinedLabel()
+		{
+			string script = @"
+				goto there
+				";
+            Assert.Throws<SyntaxErrorException>(() => {
+                Script.RunString(script);
+            });
+            
+		}
+
+		[Fact]
+		
+		public void Goto_DoubleDefinedLabel()
+		{
+			string script = @"
+				::label::
+				::label::
+				";
+            Assert.Throws<SyntaxErrorException>(() => {
+                Script.RunString(script);
+            });
+            
+		}
+
+		[Fact]
+		public void Goto_RedefinedLabel()
+		{
+			string script = @"
+				::label::
+				do
+					::label::
+				end
+				";
+
+			Script.RunString(script);
+		}
+
+		[Fact]
+		public void Goto_RedefinedLabel_Goto()
+		{
+			string script = @"
+				::label::
+				do
+					goto label
+					do return 5 end
+					::label::
+					return 3
+				end
+				";
+
+			DynValue res = Script.RunString(script);
+
+			Assert.Equal(DataType.Number, res.Type);
+			Assert.Equal(3, res.Number);
+		}
+
+		[Fact]
+		
+		public void Goto_UndefinedLabel_2()
+		{
+			string script = @"
+				goto label
+				do
+					do return 5 end
+					::label::
+					return 3
+				end
+				";
+            Assert.Throws<SyntaxErrorException>(() => {
+                DynValue res = Script.RunString(script);
+
+                Assert.Equal(DataType.Number, res.Type);
+                Assert.Equal(3, res.Number);
+            });
+            
+		}
+
+		[Fact]
+		
+		public void Goto_VarInScope()
+		{
+			string script = @"
+				goto f
+				local x
+				::f::
+				";
+            Assert.Throws<SyntaxErrorException>(() => {
+                DynValue res = Script.RunString(script);
+
+                Assert.Equal(DataType.Number, res.Type);
+                Assert.Equal(3, res.Number);
+            });
+            
+		}
+
+
+		[Fact]
+		public void Goto_JumpOutOfBlocks()
+		{
+			string script = @"
+				local u = 4
+
+				do
+					local x = 5
+	
+					do
+						local y = 6
+		
+						do
+							local z = 7
+						end
+		
+						goto out
+					end
+				end
+
+				do return 5 end
+
+				::out::
+
+				return 3
+			";
+
+			DynValue res = Script.RunString(script);
+			Assert.Equal(DataType.Number, res.Type);
+			Assert.Equal(3, res.Number);
+		}
+
+		[Fact]
+		public void Goto_JumpOutOfScopes()
+		{
+			string script = @"
+				local u = 4
+
+				do
+					local x = 5
+					do
+						local y = 6
+						do
+							goto out
+							local z = 7
+						end
+		
+					end
+				end
+
+				::out::
+
+				do 
+					local a
+					local b = 55
+
+					if (a == nil) then
+						b = b + 12
+					end
+
+					return b
+				end
+
+			";
+
+			DynValue res = Script.RunString(script);
+			Assert.Equal(DataType.Number, res.Type);
+			Assert.Equal(67, res.Number);
+		}
+	}
+}
